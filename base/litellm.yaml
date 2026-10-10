@@ -1,0 +1,50 @@
+# OpenAI-compatible gateway in front of every vLLM backend.
+# Clients call one endpoint with a virtual model name; the overlay's
+# litellm-config decides which backend serves it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  labels: {app: litellm}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: litellm}
+  template:
+    metadata:
+      labels: {app: litellm}
+    spec:
+      containers:
+        - name: litellm
+          image: litellm/litellm:v1.104.2
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef: {name: litellm-master-key, key: key}
+          ports:
+            - {name: http, containerPort: 4000}
+          readinessProbe:
+            httpGet: {path: /health/readiness, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/liveliness, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/litellm}
+      volumes:
+        - name: config
+          configMap: {name: litellm-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+spec:
+  selector: {app: litellm}
+  ports:
+    - {name: http, port: 4000, targetPort: http}

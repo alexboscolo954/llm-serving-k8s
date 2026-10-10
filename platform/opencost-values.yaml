@@ -1,0 +1,22 @@
+# helm install opencost opencost/opencost --version 2.5.32 \
+#   -n opencost --create-namespace -f platform/opencost-values.yaml
+# On-prem: no cloud billing API, so cost comes from a custom price sheet.
+# GPU usage per pod comes from the DCGM exporter scraped by Prometheus.
+opencost:
+  prometheus:
+    internal:
+      enabled: true
+      serviceName: prometheus-operated   # adjust to your Prometheus service
+      namespaceName: monitoring
+      port: 9090
+  customPricing:
+    enabled: true
+    provider: custom
+    costModel:
+      description: On-prem price sheet (hourly, USD). Replace with your amortized hardware cost.
+      CPU: 0.03
+      RAM: 0.004
+      GPU: 2.50
+      storage: 0.0001
+  ui:
+    enabled: true

@@ -1,0 +1,14 @@
+model_list:
+  - model_name: chat
+    litellm_params:
+      model: hosted_vllm/Qwen/Qwen3-8B
+      api_base: http://vllm-chat:8000/v1
+  - model_name: embed
+    litellm_params:
+      model: hosted_vllm/Qwen/Qwen3-Embedding-0.6B
+      api_base: http://vllm-embed:8000/v1
+router_settings:
+  num_retries: 2
+  timeout: 120
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

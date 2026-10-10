@@ -1,0 +1,20 @@
+# Device-plugin configs, selected per node with the label
+#   nvidia.com/device-plugin.config=<key>
+# "dedicated": one pod per GPU (big models).
+# "shared":    each GPU advertised as 4 nvidia.com/gpu (small models).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: device-plugin-config
+  namespace: gpu-operator
+data:
+  dedicated: |-
+    version: v1
+  shared: |-
+    version: v1
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 4

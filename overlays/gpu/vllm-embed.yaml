@@ -1,0 +1,56 @@
+# Small embedding model on a time-sliced GPU (platform/time-slicing-config.yaml).
+# Time-slicing shares compute but NOT memory: every pod on the card must cap
+# itself with --gpu-memory-utilization so the sum stays under 1.0.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-embed
+  labels: {app: vllm-embed}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: vllm-embed}
+  template:
+    metadata:
+      labels: {app: vllm-embed}
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+        nvidia.com/device-plugin.config: shared
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.31.0
+          args:
+            - Qwen/Qwen3-Embedding-0.6B
+            - --port=8000
+            - --runner=pooling
+            - --gpu-memory-utilization=0.20
+          ports:
+            - {name: http, containerPort: 8000}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: "1", memory: 8Gi, nvidia.com/gpu: 1}   # 1 slice, not 1 card
+            limits: {memory: 12Gi, nvidia.com/gpu: 1}
+          volumeMounts:
+            - {name: hf-cache, mountPath: /root/.cache/huggingface}
+      volumes:
+        - name: hf-cache
+          emptyDir: {sizeLimit: 10Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-embed
+spec:
+  selector: {app: vllm-embed}
+  ports:
+    - {name: http, port: 8000, targetPort: http}

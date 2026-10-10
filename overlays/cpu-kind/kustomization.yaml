@@ -1,0 +1,14 @@
+# Runs anywhere Docker runs: kind + vLLM CPU image + a 0.5B model.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: llm
+resources:
+  - ../../base
+  - vllm-chat.yaml
+configMapGenerator:
+  - name: litellm-config
+    files: [config.yaml=litellm-config.yaml]
+secretGenerator:
+  # Local demo only. The GPU overlay expects this secret to exist already.
+  - name: litellm-master-key
+    literals: [key=sk-local-dev]

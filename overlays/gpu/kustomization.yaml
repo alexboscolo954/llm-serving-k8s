@@ -1,0 +1,15 @@
+# GPU cluster with the NVIDIA GPU Operator installed (see platform/).
+# Rendered and schema-validated in CI; not executed there.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: llm
+resources:
+  - ../../base
+  - vllm-chat.yaml
+  - vllm-embed.yaml
+configMapGenerator:
+  - name: litellm-config
+    files: [config.yaml=litellm-config.yaml]
+# Secrets created out of band (Vault, External Secrets, sealed-secrets...):
+#   litellm-master-key  key=<gateway master key>
+#   hf-token            token=<Hugging Face token, for gated models>

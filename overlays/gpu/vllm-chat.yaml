@@ -1,0 +1,73 @@
+# Chat model on a dedicated GPU, weights quantized to FP8 at load time.
+# FP8 roughly halves weight memory vs BF16, leaving more room for KV cache
+# (needs Ada/Hopper or newer).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-chat
+  labels: {app: vllm-chat}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # one GPU, no room for a surge pod
+  selector:
+    matchLabels: {app: vllm-chat}
+  template:
+    metadata:
+      labels: {app: vllm-chat}
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+        nvidia.com/device-plugin.config: dedicated
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.31.0
+          args:
+            - Qwen/Qwen3-8B
+            - --port=8000
+            - --quantization=fp8
+            - --max-model-len=16384
+            - --gpu-memory-utilization=0.90
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef: {name: hf-token, key: token, optional: true}
+          ports:
+            - {name: http, containerPort: 8000}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: "4", memory: 32Gi, nvidia.com/gpu: 1}
+            limits: {memory: 48Gi, nvidia.com/gpu: 1}
+          volumeMounts:
+            - {name: hf-cache, mountPath: /root/.cache/huggingface}
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim: {claimName: vllm-chat-cache}
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 8Gi}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-chat-cache
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 50Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-chat
+spec:
+  selector: {app: vllm-chat}
+  ports:
+    - {name: http, port: 8000, targetPort: http}

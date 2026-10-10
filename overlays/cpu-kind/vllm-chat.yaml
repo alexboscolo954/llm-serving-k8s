@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-chat
+  labels: {app: vllm-chat}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: vllm-chat}
+  template:
+    metadata:
+      labels: {app: vllm-chat}
+    spec:
+      containers:
+        - name: vllm
+          # Multi-arch tag: amd64 and arm64 (Docker Desktop on Apple silicon).
+          image: vllm/vllm-openai-cpu:v0.31.0
+          args:
+            - Qwen/Qwen2.5-0.5B-Instruct
+            - --port=8000
+            - --dtype=bfloat16
+            - --max-model-len=2048
+          env:
+            - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
+          ports:
+            - {name: http, containerPort: 8000}
+          securityContext:
+            capabilities: {add: [SYS_NICE]}   # NUMA/thread binding
+          startupProbe:   # first start downloads ~1 GB of weights
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: "2", memory: 4Gi}
+            limits: {memory: 6Gi}
+          volumeMounts:
+            - {name: hf-cache, mountPath: /root/.cache/huggingface}
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: hf-cache
+          emptyDir: {}
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-chat
+spec:
+  selector: {app: vllm-chat}
+  ports:
+    - {name: http, port: 8000, targetPort: http}
