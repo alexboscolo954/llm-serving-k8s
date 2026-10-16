@@ -3,6 +3,9 @@
 # image is already on the node in kind. Each run prints one "RESULT <json>"
 # line; `make bench` collects them and bench/report.py turns them into a table.
 # Defaults are CI-sized. A GPU Benchmark session overrides the env values.
+# Through the Gateway, output-token counts are re-counted from text (±1 per
+# request): LiteLLM's usage chunk carries an empty choice, which vllm bench
+# reads as a token. Compare engines with BASE_URL pointed at the Backend.
 apiVersion: batch/v1
 kind: Job
 metadata:
