@@ -5,6 +5,10 @@ K8S     := 1.33.0
 PYTEST  ?= python3 -m pytest
 RUN     ?= $(shell date +%F)-cpu-kind
 TF      := terraform -chdir=bench/infra
+# L4 stock-outs are common: retry with another zone (us-west1-a, europe-west4-c...).
+# Spot can be reclaimed within minutes when L4s are scarce; SPOT=false is on-demand.
+ZONE    ?= us-central1-a
+SPOT    ?= true
 BENCHKC := $(HOME)/k8s_clusters/llm-bench-l4.yaml
 VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
@@ -32,9 +36,9 @@ test: ## e2e tests against the running gateway
 bench: ## load test through the gateway; results in bench/results/$(RUN)
 	bench/run.sh bench/results/$(RUN)
 
-bench-up: ## spot L4 VM with RKE2 (auto-deletes after max_hours), kubeconfig in $(BENCHKC)
+bench-up: ## L4 VM with RKE2 (auto-deletes after max_hours), kubeconfig in $(BENCHKC)
 	$(TF) init -input=false >/dev/null
-	$(TF) apply -auto-approve -var ssh_cidr=$$(curl -s https://ifconfig.me)/32
+	$(TF) apply -auto-approve -var ssh_cidr=$$(curl -s https://ifconfig.me)/32 -var zone=$(ZONE) -var region=$(shell echo $(ZONE) | sed 's/-[a-z]$$//') -var spot=$(SPOT)
 	until gcloud compute ssh $(VM) --quiet --command 'sudo test -e /etc/rancher/rke2/rke2.yaml' 2>/dev/null; do sleep 15; done
 	gcloud compute ssh $(VM) --quiet --command 'sudo cat /etc/rancher/rke2/rke2.yaml' | sed 's/127.0.0.1:6443/127.0.0.1:16443/' > $(BENCHKC)
 	$(MAKE) bench-tunnel

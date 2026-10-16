@@ -36,6 +36,7 @@ resource "google_compute_network" "bench" {
 
 resource "google_compute_subnetwork" "bench" {
   name          = "llm-bench"
+  region        = var.region
   network       = google_compute_network.bench.id
   ip_cidr_range = "10.10.0.0/24"
 }

@@ -7,11 +7,12 @@
 set -eu
 out=$1; shift
 steps=${*:-platform fp8 gateway bf16 shared}
-node=llm-bench-l4
+vm=llm-bench-l4
 
 # Refuse to touch any cluster but the bench VM.
 [ -n "${KUBECONFIG:-}" ] || { echo "set KUBECONFIG explicitly"; exit 1; }
-[ "$(kubectl get nodes -o name)" = "node/$node" ] || { echo "not the bench cluster"; exit 1; }
+node=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+case $node in $vm|$vm.*) ;; *) echo "not the bench cluster: $node"; exit 1 ;; esac
 
 # Fixed methodology: 1024 in / 256 out, 3 repeats, median reported.
 BENCH="TOKENIZER=Qwen/Qwen3-8B INPUT_LEN=1024 OUTPUT_LEN=256 REPEATS=3 PROMPTS_PER_CONCURRENCY=16 WARMUPS=4"
@@ -56,7 +57,7 @@ for step in $steps; do
     {
       echo "# Setup, $(date -u +%FT%TZ)"
       echo; echo '```'
-      gcloud compute instances list --filter=name=$node --format='value(machineType.basename(),zone.basename(),scheduling.provisioningModel)'
+      gcloud compute instances list --filter=name=$vm --format='value(machineType.basename(),zone.basename(),scheduling.provisioningModel)'
       kubectl get node $node -o jsonpath='{.status.nodeInfo.kubeletVersion} {.status.nodeInfo.containerRuntimeVersion} {.status.nodeInfo.osImage} {.status.nodeInfo.kernelVersion}{"\n"}'
       kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -- nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
       kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -- nvidia-smi | grep -o 'CUDA Version: [0-9.]*'
