@@ -3,8 +3,8 @@ on:
   push: {branches: [main]}
   pull_request:
 
-# One kind cluster per milestone, in parallel: a 2-vCPU / ~7 GB runner
-# can't hold the whole stack at once.
+# One kind cluster per milestone, in parallel: a 4-vCPU / 16 GB runner
+# would crawl with every Backend and add-on on one node.
 jobs:
   validate:
     runs-on: ubuntu-24.04

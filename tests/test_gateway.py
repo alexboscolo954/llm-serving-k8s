@@ -16,7 +16,7 @@ def post(path, body, key=KEY):
         data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
-    return urllib.request.urlopen(req, timeout=120)
+    return urllib.request.urlopen(req, timeout=300)
 
 
 def chat(**extra):

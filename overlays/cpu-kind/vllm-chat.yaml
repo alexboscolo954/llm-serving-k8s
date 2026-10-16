@@ -5,7 +5,7 @@ metadata:
   labels: {app: vllm-chat}
 spec:
   replicas: 1
-  strategy: {type: Recreate}   # no room for a surge pod on a 7 GB node
+  strategy: {type: Recreate}   # no room for a surge pod in 8 GB of Docker Desktop
   selector:
     matchLabels: {app: vllm-chat}
   template:
@@ -23,6 +23,7 @@ spec:
             - --max-model-len=2048
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
+            - {name: VLLM_CPU_OMP_THREADS_BIND, value: nobind}   # "auto" pins to 1 core on a 4-vCPU SMT runner
           ports:
             - {name: http, containerPort: 8000}
           securityContext:
@@ -35,7 +36,7 @@ spec:
             httpGet: {path: /health, port: http}
             periodSeconds: 10
           resources:
-            requests: {cpu: 500m, memory: 3Gi}   # no CPU limit: uses all cores, fits a 2-vCPU runner
+            requests: {cpu: 500m, memory: 3Gi}   # no CPU limit: uses all cores
             limits: {memory: 6Gi}
           volumeMounts:
             - {name: hf-cache, mountPath: /root/.cache/huggingface}

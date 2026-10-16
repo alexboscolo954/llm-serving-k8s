@@ -1,6 +1,6 @@
 # Small embedding model so CI also routes a second Virtual model (embed).
 # The GPU overlay uses Qwen3-Embedding-0.6B; a 33M BERT model keeps this
-# within a 2-vCPU / 7 GB runner next to the chat Backend.
+# within 8 GB of Docker Desktop next to the chat Backend.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +8,7 @@ metadata:
   labels: {app: vllm-embed}
 spec:
   replicas: 1
-  strategy: {type: Recreate}   # no room for a surge pod on a 7 GB node
+  strategy: {type: Recreate}   # no room for a surge pod in 8 GB of Docker Desktop
   selector:
     matchLabels: {app: vllm-embed}
   template:
@@ -25,6 +25,7 @@ spec:
             - --max-model-len=512
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
+            - {name: VLLM_CPU_OMP_THREADS_BIND, value: nobind}   # "auto" pins to 1 core on a 4-vCPU SMT runner
           ports:
             - {name: http, containerPort: 8000}
           securityContext:
