@@ -5,6 +5,7 @@ metadata:
   labels: {app: vllm-chat}
 spec:
   replicas: 1
+  strategy: {type: Recreate}   # no room for a surge pod on a 7 GB node
   selector:
     matchLabels: {app: vllm-chat}
   template:

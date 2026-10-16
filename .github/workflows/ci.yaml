@@ -3,33 +3,49 @@ on:
   push: {branches: [main]}
   pull_request:
 
+# One kind cluster per milestone, in parallel: a 2-vCPU / ~7 GB runner
+# can't hold the whole stack at once.
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12"}
       - uses: azure/setup-helm@v5
-      - name: Install kubeconform
+      - name: Install kubeconform, kyverno, pytest
         run: |
-          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz
-          sudo mv kubeconform /usr/local/bin/
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          curl -sL https://github.com/kyverno/kyverno/releases/download/v1.19.1/kyverno-cli_v1.19.1_linux_x86_64.tar.gz | tar xz kyverno
+          sudo mv kubeconform kyverno /usr/local/bin/
+          pip install pytest==9.0.2
       - run: make validate
 
-  e2e-cpu:
-    # Real end-to-end run: kind + vLLM CPU + LiteLLM, then a chat completion.
-    runs-on: ubuntu-latest
+  e2e-gateway:
+    # kind + vLLM CPU (chat + embed) + LiteLLM: e2e tests, then a small load test.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12"}
+      - run: pip install pytest==9.0.2
+      - name: Runner size
+        run: nproc && free -g
       - uses: helm/kind-action@v1
         with:
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
       - run: make up
-      - run: make smoke
+      - run: make test
+      - run: make bench RUN=ci
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: {name: bench-ci, path: bench/results/ci, if-no-files-found: ignore}
       - if: failure()
         run: |
           kubectl -n llm get pods -o wide
           kubectl -n llm describe pods
           kubectl -n llm logs deploy/vllm-chat --tail=200
+          kubectl -n llm logs deploy/vllm-embed --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
