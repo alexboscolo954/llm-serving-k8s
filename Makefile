@@ -4,10 +4,13 @@ KEY     := sk-local-dev
 K8S     := 1.33.0
 PYTEST  ?= python3 -m pytest
 RUN     ?= $(shell date +%F)-cpu-kind
+TF      := terraform -chdir=bench/infra
+BENCHKC := $(HOME)/k8s_clusters/llm-bench-l4.yaml
+VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up smoke test bench down validate
+.PHONY: up smoke test bench down validate bench-up bench-tunnel bench-gpu bench-down
 
 up: ## kind cluster + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
@@ -27,14 +30,27 @@ test: ## e2e tests against the running gateway
 	@$(GATEWAY) $(PYTEST) -v tests
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
-	kubectl -n $(NS) delete job bench --ignore-not-found
-	kubectl -n $(NS) apply -f bench/job.yaml
-	until [ -n "$$(kubectl -n $(NS) get job bench -o jsonpath='{.status.succeeded}{.status.failed}')" ]; do sleep 5; done
-	mkdir -p bench/results/$(RUN)
-	kubectl -n $(NS) logs job/bench > bench/results/$(RUN)/bench.log
-	test "$$(kubectl -n $(NS) get job bench -o jsonpath='{.status.succeeded}')" = 1 || { tail -30 bench/results/$(RUN)/bench.log; exit 1; }
-	sed -n 's/^RESULT //p' bench/results/$(RUN)/bench.log > bench/results/$(RUN)/raw.jsonl
-	python3 bench/report.py bench/results/$(RUN)/raw.jsonl | tee bench/results/$(RUN)/results.md
+	bench/run.sh bench/results/$(RUN)
+
+bench-up: ## spot L4 VM with RKE2 (auto-deletes after max_hours), kubeconfig in $(BENCHKC)
+	$(TF) init -input=false >/dev/null
+	$(TF) apply -auto-approve -var ssh_cidr=$$(curl -s https://ifconfig.me)/32
+	until gcloud compute ssh $(VM) --quiet --command 'sudo test -e /etc/rancher/rke2/rke2.yaml' 2>/dev/null; do sleep 15; done
+	gcloud compute ssh $(VM) --quiet --command 'sudo cat /etc/rancher/rke2/rke2.yaml' | sed 's/127.0.0.1:6443/127.0.0.1:16443/' > $(BENCHKC)
+	$(MAKE) bench-tunnel
+
+bench-tunnel: ## (re)open the SSH tunnel to the VM's Kubernetes API on localhost:16443
+	-pkill -f '16443:127.0.0.1:6443'
+	gcloud compute ssh $(VM) --quiet -- -f -N -L 16443:127.0.0.1:6443
+	KUBECONFIG=$(BENCHKC) kubectl get nodes
+
+bench-gpu: ## GPU Benchmark session (STEPS= to run a subset); results in bench/results/<date>-l4
+	KUBECONFIG=$(BENCHKC) bench/session.sh bench/results/$(shell date +%F)-l4 $(STEPS)
+
+bench-down: ## delete the VM and its network, then prove nothing is left running
+	-pkill -f '16443:127.0.0.1:6443'
+	$(TF) destroy -auto-approve -var ssh_cidr=0.0.0.0/32
+	test -z "$$(gcloud compute instances list --format='value(name)')"
 
 down:
 	kind delete cluster --name $(CLUSTER)
@@ -44,12 +60,15 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	for o in cpu-kind gpu; do kubectl kustomize overlays/$$o | kyverno apply policies/serving.yaml --resource - || exit 1; done
 	kyverno apply policies/serving.yaml --resource bench/job.yaml
 	kyverno apply policies/serving.yaml --resource policies/violations.yaml 2>&1 | grep -q 'fail: 4,'   # every rule must bite
-	kubeconform -strict -summary platform/time-slicing-config.yaml bench/job.yaml
+	kyverno apply policies/serving.yaml --resource bench/embed-load.yaml
+	kubeconform -strict -summary platform/time-slicing-config.yaml bench/job.yaml bench/embed-load.yaml
+	terraform -chdir=bench/infra fmt -check
+	terraform -chdir=bench/infra init -backend=false -input=false >/dev/null && terraform -chdir=bench/infra validate
 	$(PYTEST) -q bench
 	helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null
 	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
 	helm repo update nvidia opencost >/dev/null
-	helm template gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator -f platform/gpu-operator-values.yaml \
+	helm template gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template opencost opencost/opencost --version 2.5.32 -n opencost -f platform/opencost-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
