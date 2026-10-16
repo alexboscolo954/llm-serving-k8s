@@ -5,6 +5,7 @@ namespace: llm
 resources:
   - ../../base
   - vllm-chat.yaml
+  - vllm-embed.yaml
 configMapGenerator:
   - name: litellm-config
     files: [config.yaml=litellm-config.yaml]
@@ -12,3 +13,4 @@ secretGenerator:
   # Local demo only. The GPU overlay expects this secret to exist already.
   - name: litellm-master-key
     literals: [key=sk-local-dev]
+    options: {disableNameSuffixHash: true}   # same name as the GPU overlay's secret, so bench/job.yaml works on both

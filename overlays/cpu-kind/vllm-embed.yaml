@@ -1,0 +1,59 @@
+# Small embedding model so CI also routes a second Virtual model (embed).
+# The GPU overlay uses Qwen3-Embedding-0.6B; a 33M BERT model keeps this
+# within 8 GB of Docker Desktop next to the chat Backend.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-embed
+  labels: {app: vllm-embed}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # no room for a surge pod in 8 GB of Docker Desktop
+  selector:
+    matchLabels: {app: vllm-embed}
+  template:
+    metadata:
+      labels: {app: vllm-embed}
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai-cpu:v0.31.0
+          args:
+            - BAAI/bge-small-en-v1.5
+            - --port=8000
+            - --runner=pooling
+            - --max-model-len=512
+          env:
+            - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
+            - {name: VLLM_CPU_OMP_THREADS_BIND, value: nobind}   # "auto" pins to 1 core on a 4-vCPU SMT runner
+          ports:
+            - {name: http, containerPort: 8000}
+          securityContext:
+            capabilities: {add: [SYS_NICE]}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 1Gi}
+            limits: {memory: 3Gi}
+          volumeMounts:
+            - {name: hf-cache, mountPath: /root/.cache/huggingface}
+            - {name: dshm, mountPath: /dev/shm}   # vLLM's IPC ring buffer needs ~160 MiB
+      volumes:
+        - name: hf-cache
+          emptyDir: {}
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-embed
+spec:
+  selector: {app: vllm-embed}
+  ports:
+    - {name: http, port: 8000, targetPort: http}

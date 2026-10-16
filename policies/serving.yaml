@@ -1,0 +1,69 @@
+# README claims turned into rules. `make validate` checks every rendered
+# overlay against them with the kyverno CLI (no cluster needed).
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: backends
+spec:
+  validationActions: [Deny]
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, statefulsets]
+  matchConditions:
+    - name: is-backend
+      expression: object.metadata.name.startsWith('vllm-')
+  validations:
+    - message: Backends need a startup probe (weights download), a readiness probe and a memory limit.
+      expression: >-
+        object.spec.template.spec.containers.all(c,
+          has(c.startupProbe) && has(c.readinessProbe) &&
+          has(c.resources.limits) && 'memory' in c.resources.limits)
+    - message: A GPU vLLM image without an nvidia.com/gpu limit would never land on a GPU.
+      expression: >-
+        object.spec.template.spec.containers.all(c,
+          !c.image.startsWith('vllm/vllm-openai:') ||
+          (has(c.resources.limits) && 'nvidia.com/gpu' in c.resources.limits))
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: backends-stay-inside-the-cluster
+spec:
+  validationActions: [Deny]
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [services]
+  matchConditions:
+    - name: is-backend
+      expression: object.metadata.name.startsWith('vllm-')
+  validations:
+    - message: Backends are only reachable through the Gateway.
+      expression: "!has(object.spec.type) || object.spec.type == 'ClusterIP'"
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: images-are-pinned
+spec:
+  validationActions: [Deny]
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, statefulsets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs]
+  validations:
+    - message: Images need an explicit version tag.
+      expression: >-
+        object.spec.template.spec.containers.all(c,
+          c.image.matches(':[^/]+$') && !c.image.endsWith(':latest'))

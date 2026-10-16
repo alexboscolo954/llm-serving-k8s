@@ -1,0 +1,4 @@
+__pycache__/
+# CPU and CI load-test runs; only GPU Benchmark sessions are committed
+bench/results/ci/
+bench/results/*-cpu-kind/
