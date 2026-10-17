@@ -1,0 +1,8 @@
+# Layer on top of gpu-operator-values.yaml when the cluster is RKE2,
+# which runs its own containerd:
+#   helm install ... -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml
+# Expect RKE2 to restart once while the toolkit reconfigures containerd.
+toolkit:
+  env:
+    - name: CONTAINERD_SOCKET
+      value: /run/k3s/containerd/containerd.sock

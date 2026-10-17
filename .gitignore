@@ -2,3 +2,6 @@ __pycache__/
 # CPU and CI load-test runs; only GPU Benchmark sessions are committed
 bench/results/ci/
 bench/results/*-cpu-kind/
+# Terraform working state for the bench VM (the lock file is committed)
+bench/infra/.terraform/
+bench/infra/terraform.tfstate*

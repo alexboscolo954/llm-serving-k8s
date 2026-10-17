@@ -28,6 +28,7 @@ spec:
             - --port=8000
             - --runner=pooling
             - --gpu-memory-utilization=0.20
+            - --max-model-len=8192   # the default 32k context needs 3.5 GiB of KV cache, more than 0.20 of an L4 leaves
           ports:
             - {name: http, containerPort: 8000}
           startupProbe:

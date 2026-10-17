@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - uses: azure/setup-helm@v5
+      - uses: hashicorp/setup-terraform@v4
+        with: {terraform_version: 1.15.5, terraform_wrapper: false}
       - name: Install kubeconform, kyverno, pytest
         run: |
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform

@@ -18,23 +18,32 @@ COLUMNS = [
 ]
 
 
-def report(runs):
+def by_concurrency(runs):
     failed = sum(r["failed"] for r in runs)
     if failed or not runs:
         raise SystemExit(f"{failed} failed requests in {len(runs)} runs")
     by_conc = {}
     for r in runs:
         by_conc.setdefault(r["max_concurrency"], []).append(r)
+    return dict(sorted(by_conc.items()))
+
+
+def load(path):
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def report(runs):
+    by_conc = by_concurrency(runs)
     lines = [
         "| Concurrency | Runs | " + " | ".join(h for h, _ in COLUMNS) + " |",
         "|---" * (len(COLUMNS) + 2) + "|",
     ]
-    for conc, rs in sorted(by_conc.items()):
+    for conc, rs in by_conc.items():
         cells = [f"{median(r[k] for r in rs):.1f}" for _, k in COLUMNS]
         lines.append(f"| {conc} | {len(rs)} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    with open(sys.argv[1]) as f:
-        print(report([json.loads(line) for line in f if line.strip()]))
+    print(report(load(sys.argv[1])))

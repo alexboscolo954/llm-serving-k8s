@@ -1,0 +1,30 @@
+# Steady embedding traffic for the time-slicing step of bench/session.sh.
+# Runs until deleted; its numbers are not collected.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: embed-load
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load
+          image: vllm/vllm-openai-cpu:v0.31.0
+          command:
+            - vllm
+            - bench
+            - serve
+            - --backend=openai-embeddings
+            - --endpoint=/v1/embeddings
+            - --base-url=http://vllm-embed:8000
+            - --model=Qwen/Qwen3-Embedding-0.6B
+            - --dataset-name=random
+            - --random-input-len=256
+            - --num-prompts=1000000
+            - --max-concurrency=16
+            - --disable-tqdm
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {memory: 2Gi}

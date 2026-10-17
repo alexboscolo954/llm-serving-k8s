@@ -6,6 +6,7 @@
 # Through the Gateway, output-token counts are re-counted from text (±1 per
 # request): LiteLLM's usage chunk carries an empty choice, which vllm bench
 # reads as a token. Compare engines with BASE_URL pointed at the Backend.
+# Each run gets its own seed so repeats don't hit vLLM's prefix cache.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -25,9 +26,9 @@ spec:
               for c in $CONCURRENCY; do
                 for r in $(seq "$REPEATS"); do
                   vllm bench serve --backend openai-chat --endpoint /v1/chat/completions \
-                    --base-url "$BASE_URL" --served-model-name "$VIRTUAL_MODEL" --model "$TOKENIZER" \
+                    --base-url "$BASE_URL" --served-model-name "$MODEL_NAME" --model "$TOKENIZER" \
                     --dataset-name random --random-input-len "$INPUT_LEN" --random-output-len "$OUTPUT_LEN" \
-                    --ignore-eos --seed 0 --num-prompts "$NUM_PROMPTS" --num-warmups "$WARMUPS" \
+                    --ignore-eos --seed "$((c * 100 + r))" --num-prompts "$((c * PROMPTS_PER_CONCURRENCY))" --num-warmups "$WARMUPS" \
                     --max-concurrency "$c" --percentile-metrics ttft,tpot,itl,e2el --metric-percentiles 50,95,99 \
                     --save-result --result-dir /tmp/r --result-filename run.json --disable-tqdm
                   echo "RESULT $(cat /tmp/r/run.json)"
@@ -35,11 +36,11 @@ spec:
               done
           env:
             - {name: BASE_URL, value: "http://litellm:4000"}
-            - {name: VIRTUAL_MODEL, value: chat}
+            - {name: MODEL_NAME, value: chat}   # Virtual model via the Gateway, or the Backend's served name
             - {name: TOKENIZER, value: Qwen/Qwen2.5-0.5B-Instruct}   # must match the Backend's model
             - {name: CONCURRENCY, value: "1 2"}
             - {name: REPEATS, value: "1"}
-            - {name: NUM_PROMPTS, value: "8"}
+            - {name: PROMPTS_PER_CONCURRENCY, value: "8"}   # c=64 needs more prompts than c=1 to reach steady state
             - {name: WARMUPS, value: "1"}
             - {name: INPUT_LEN, value: "128"}
             - {name: OUTPUT_LEN, value: "32"}
