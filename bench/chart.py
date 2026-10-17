@@ -1,4 +1,6 @@
 """Throughput and p95 TTFT against concurrency, one line per configuration.
+Only concurrency levels measured for every configuration are drawn, so the
+lines compare like for like.
 
     python3 bench/chart.py <out-prefix> FP8=<dir>/raw.jsonl BF16=<dir>/raw.jsonl
 
@@ -27,14 +29,13 @@ PANELS = [("output_throughput", "Output tokens/s (higher is better)"),
           ("p95_ttft_ms", "Time to first token p95, ms (lower is better)")]
 
 
-def draw(series, theme, path):
+def draw(series, xs, theme, path):
     t = THEMES[theme]
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), facecolor=t["surface"])
     for ax, (key, title) in zip(axes, PANELS):
         ax.set_facecolor(t["surface"])
         for (label, by_conc), color in zip(series, t["series"]):
-            xs = list(by_conc)
-            ys = [median(r[key] for r in rs) for rs in by_conc.values()]
+            ys = [median(r[key] for r in by_conc[x]) for x in xs]
             ax.plot(xs, ys, color=color, linewidth=2, marker="o", markersize=8,
                     markeredgecolor=t["surface"], markeredgewidth=2, label=label)
             ax.annotate(f"{label} {ys[-1]:,.0f}", (xs[-1], ys[-1]), xytext=(6, 0),
@@ -59,5 +60,6 @@ def draw(series, theme, path):
 if __name__ == "__main__":
     prefix, *pairs = sys.argv[1:]
     series = [(label, by_concurrency(load(path))) for label, path in (p.split("=", 1) for p in pairs)]
+    xs = sorted(set.intersection(*(set(by_conc) for _, by_conc in series)))
     for theme in THEMES:
-        draw(series, theme, f"{prefix}-{theme}.png")
+        draw(series, xs, theme, f"{prefix}-{theme}.png")

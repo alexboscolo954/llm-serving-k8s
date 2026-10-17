@@ -1,12 +1,14 @@
 #!/bin/sh
 # GPU Benchmark session on the single-L4 RKE2 VM from bench/infra.
 #   KUBECONFIG=~/k8s_clusters/llm-bench-l4.yaml bench/session.sh <out-dir> [step ...]
-# Steps: platform fp8 gateway bf16 shared (default: all, in that order).
+# Steps: platform fp8 gateway shared bf16 bf16-64 (default: all, in that order).
+# The order keeps the most expendable run last: one L4 session hits the VM's
+# 5 h cap otherwise (FP8 alone takes ~70 min).
 # Results land on the laptop after every step, so a spot preemption only
 # loses the step in progress.
 set -eu
 out=$1; shift
-steps=${*:-platform fp8 gateway bf16 shared}
+steps=${*:-platform fp8 gateway shared bf16 bf16-64}
 vm=llm-bench-l4
 
 # Refuse to touch any cluster but the bench VM.
@@ -78,19 +80,27 @@ for step in $steps; do
     bench/run.sh "$out/gateway" $BENCH MODEL_NAME=chat CONCURRENCY=16
     ;;
   bf16)
+    kubectl -n llm scale deploy/vllm-embed --replicas=0   # frees its slice before going back to one whole GPU
+    kubectl label node $node nvidia.com/device-plugin.config=dedicated --overwrite
+    gpus 1
     chat '"--gpu-memory-utilization=0.90"' dedicated
-    bench/run.sh "$out/bf16" $BENCH $DIRECT CONCURRENCY="1 4 16 64"
+    bench/run.sh "$out/bf16" $BENCH $DIRECT CONCURRENCY="1 4 16"
+    ;;
+  bf16-64)  # KV-starved and slow (~30 min a run), so one run; FP8 repeats differed by <0.1%
+    bench/run.sh "$out/bf16-64" $BENCH $DIRECT CONCURRENCY=64 REPEATS=1
     ;;
   shared)  # time-slicing cost: chat alone vs chat next to a busy embed Backend, same caps
     kubectl label node $node nvidia.com/device-plugin.config=shared --overwrite
     gpus 4
     chat '"--quantization=fp8","--gpu-memory-utilization=0.70"' shared
-    bench/run.sh "$out/shared-alone" $BENCH $DIRECT CONCURRENCY="1 16"
+    bench/run.sh "$out/shared-alone" $BENCH $DIRECT CONCURRENCY=16
     kubectl -n llm scale deploy/vllm-embed --replicas=1   # only after chat holds its memory
     kubectl -n llm rollout status deploy/vllm-embed --timeout=15m
     kubectl -n llm apply -f bench/embed-load.yaml
-    bench/run.sh "$out/shared-busy" $BENCH $DIRECT CONCURRENCY="1 16"
+    bench/run.sh "$out/shared-busy" $BENCH $DIRECT CONCURRENCY=16
     kubectl -n llm delete -f bench/embed-load.yaml
+    # the embed Backend's own throughput is the proof that the neighbour was actually busy
+    kubectl -n llm logs deploy/vllm-embed | grep 'Engine 000' > "$out/shared-busy/vllm-embed-stats.log"
     ;;
   esac
 done

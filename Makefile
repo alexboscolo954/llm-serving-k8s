@@ -45,7 +45,7 @@ bench-up: ## L4 VM with RKE2 (auto-deletes after max_hours), kubeconfig in $(BEN
 
 bench-tunnel: ## (re)open the SSH tunnel to the VM's Kubernetes API on localhost:16443
 	-pkill -f '16443:127.0.0.1:6443'
-	gcloud compute ssh $(VM) --quiet -- -f -N -L 16443:127.0.0.1:6443
+	gcloud compute ssh $(VM) --quiet -- -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -L 16443:127.0.0.1:6443
 	KUBECONFIG=$(BENCHKC) kubectl get nodes
 
 bench-gpu: ## GPU Benchmark session (STEPS= to run a subset); results in bench/results/<date>-l4
