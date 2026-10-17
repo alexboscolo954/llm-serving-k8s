@@ -8,8 +8,8 @@ terraform {
   }
 }
 
-variable "project" { default = "vllm-511814" }
-variable "billing_account" { default = "01C674-CBF418-50AE79" }
+variable "project" { description = "GCP project ID (TF_VAR_project)" }
+variable "billing_account" { description = "Billing account ID for the budget alert (TF_VAR_billing_account)" }
 variable "region" { default = "us-central1" }
 variable "zone" { default = "us-central1-a" } # L4 spot stock-outs happen: retry with -b or -c
 variable "max_hours" { default = 5 }

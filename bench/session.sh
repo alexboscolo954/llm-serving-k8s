@@ -1,14 +1,14 @@
 #!/bin/sh
 # GPU Benchmark session on the single-L4 RKE2 VM from bench/infra.
 #   KUBECONFIG=~/k8s_clusters/llm-bench-l4.yaml bench/session.sh <out-dir> [step ...]
-# Steps: platform fp8 gateway shared bf16 bf16-64 (default: all, in that order).
-# The order keeps the most expendable run last: one L4 session hits the VM's
-# 5 h cap otherwise (FP8 alone takes ~70 min).
+# Steps: platform fp8 gateway shared bf16 (default, in that order), plus the
+# opt-in bf16-64: BF16 at concurrency 64 did not finish in an hour on one L4,
+# and a full session already takes ~4 h of the VM's 5 h cap.
 # Results land on the laptop after every step, so a spot preemption only
 # loses the step in progress.
 set -eu
 out=$1; shift
-steps=${*:-platform fp8 gateway shared bf16 bf16-64}
+steps=${*:-platform fp8 gateway shared bf16}
 vm=llm-bench-l4
 
 # Refuse to touch any cluster but the bench VM.
@@ -86,7 +86,7 @@ for step in $steps; do
     chat '"--gpu-memory-utilization=0.90"' dedicated
     bench/run.sh "$out/bf16" $BENCH $DIRECT CONCURRENCY="1 4 16"
     ;;
-  bf16-64)  # KV-starved and slow (~30 min a run), so one run; FP8 repeats differed by <0.1%
+  bf16-64)  # KV-starved and very slow, so one run; FP8 repeats differed by <0.1%
     bench/run.sh "$out/bf16-64" $BENCH $DIRECT CONCURRENCY=64 REPEATS=1
     ;;
   shared)  # time-slicing cost: chat alone vs chat next to a busy embed Backend, same caps

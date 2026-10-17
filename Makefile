@@ -38,7 +38,7 @@ bench: ## load test through the gateway; results in bench/results/$(RUN)
 
 bench-up: ## L4 VM with RKE2 (auto-deletes after max_hours), kubeconfig in $(BENCHKC)
 	$(TF) init -input=false >/dev/null
-	$(TF) apply -auto-approve -var ssh_cidr=$$(curl -s https://ifconfig.me)/32 -var zone=$(ZONE) -var region=$(shell echo $(ZONE) | sed 's/-[a-z]$$//') -var spot=$(SPOT)
+	$(TF) apply -auto-approve -input=false -var ssh_cidr=$$(curl -s https://ifconfig.me)/32 -var zone=$(ZONE) -var region=$(shell echo $(ZONE) | sed 's/-[a-z]$$//') -var spot=$(SPOT)
 	until gcloud compute ssh $(VM) --quiet --command 'sudo test -e /etc/rancher/rke2/rke2.yaml' 2>/dev/null; do sleep 15; done
 	gcloud compute ssh $(VM) --quiet --command 'sudo cat /etc/rancher/rke2/rke2.yaml' | sed 's/127.0.0.1:6443/127.0.0.1:16443/' > $(BENCHKC)
 	$(MAKE) bench-tunnel
@@ -53,7 +53,7 @@ bench-gpu: ## GPU Benchmark session (STEPS= to run a subset); results in bench/r
 
 bench-down: ## delete the VM and its network, then prove nothing is left running
 	-pkill -f '16443:127.0.0.1:6443'
-	$(TF) destroy -auto-approve -var ssh_cidr=0.0.0.0/32
+	$(TF) destroy -auto-approve -input=false -var ssh_cidr=0.0.0.0/32
 	test -z "$$(gcloud compute instances list --format='value(name)')"
 
 down:

@@ -18,11 +18,11 @@ Engine numbers are measured directly against the vLLM Backend. Repeats differed 
 | 1 | 25.5 | 16.2 | +57% | 236 ms | 356 ms | 38.4 ms | 60.7 ms |
 | 4 | 90.9 | 56.7 | +60% | 688 ms | 1,050 ms | 40.9 ms | 65.8 ms |
 | 16 | 253.0 | 162.2 | +56% | 1,721 ms | 2,498 ms | 50.9 ms | 75.7 ms |
-| 64 | 403.3 | ~160* | ~2.5× | 25,449 ms | did not finish | 81.5 ms | n/a |
+| 64 | 403.3 | did not finish* | n/a | 25,449 ms | n/a | 81.5 ms | n/a |
 
 - **KV cache:** at `--gpu-memory-utilization=0.90`, FP8 leaves room for **64,320 tokens** of KV cache, BF16 for **19,760**. FP8 fits 3.3× more context on the same card.
 - **At concurrency 64 both are KV-bound.** FP8 keeps about 50 requests running and queues the rest, which is why its p95 TTFT jumps to 25 s.
-- \***BF16 at 64 never completed.** Only about 16 requests fit, and the engine kept preempting and recomputing them: in 58 minutes it generated roughly 557k tokens for a job that needs 262k. The ~160 tok/s is the engine's own logged generation rate ([`bf16-64/vllm-engine-stats.log`](bf16-64/vllm-engine-stats.log)), not a client measurement. The run was stopped at the VM's time cap.
+- \***BF16 at 64 did not finish in 58 minutes** (FP8 took 11) and was stopped at the VM's time cap. The engine's own log ([`bf16-64/vllm-engine-stats.log`](bf16-64/vllm-engine-stats.log)) shows the KV cache about 96% full, about 16 requests running and 47 waiting, at about 160 tok/s logged generation. That rate is an engine-side figure, not comparable to the client-measured numbers above, and why the run took this long is not established.
 
 ## Gateway overhead (FP8, concurrency 16)
 

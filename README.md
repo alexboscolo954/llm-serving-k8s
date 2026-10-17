@@ -27,7 +27,7 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Load-test harness (`vllm bench serve` as a Job) | **CI-proven** | [`bench/`](bench): runs through the gateway on every PR; CPU numbers check the harness, they are not a benchmark |
 | Manifest rules: probes, memory limits, GPU requests, backends ClusterIP-only, pinned images | **CI-proven** | [`policies/`](policies): checked on every rendered overlay, and each rule is shown to fail on a broken manifest |
 | FP8 chat model on a dedicated GPU: +56–60% throughput over BF16, 3.3× the KV cache | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4): 1× L4, 3 repeats per point |
-| Embeddings and chat sharing one time-sliced GPU under memory caps | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#time-slicing-fp8-concurrency-16): chat throughput unchanged; neighbour load level not recorded |
+| Embeddings on a time-sliced GPU (run next to the chat model in the session) | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#time-slicing-fp8-concurrency-16): chat throughput unchanged; neighbour load level not recorded |
 | Gateway overhead | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#gateway-overhead-fp8-concurrency-16): same throughput and p95, about 400 ms higher mean TTFT |
 | GPU Operator on RKE2, per-node GPU sharing profiles | **Benchmarked** | [`platform/`](platform), [`bench/infra`](bench/infra): installed and used in the session |
 | OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): needs Prometheus (next milestone) |
@@ -50,9 +50,9 @@ Why the split: [ADR-0001](docs/adr/0001-every-claim-is-proven-or-labelled.md).
 | 1 | 25.5 | 16.2 | 236 ms | 356 ms |
 | 4 | 90.9 | 56.7 | 688 ms | 1,050 ms |
 | 16 | 253.0 | 162.2 | 1,721 ms | 2,498 ms |
-| 64 | 403.3 | ~160, did not finish | 25,449 ms | n/a |
+| 64 | 403.3 | did not finish in 58 min | 25,449 ms | n/a |
 
-Qwen3-8B, vLLM v0.31.0, 1024 input / 256 output tokens, median of 3 runs. At 64 concurrent requests BF16's KV cache holds only about 16 of them, and the engine spent the run preempting and recomputing.
+Qwen3-8B, vLLM v0.31.0, 1024 input / 256 output tokens, median of 3 runs. At 64 concurrent requests BF16's KV cache holds only about 16 of them; the run did not finish within the VM's time cap.
 Full write-up, method, and the bug this session found in the GPU overlay: [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4).
 
 **Roadmap:** observability, autoscaling, and multi-tenancy. Each lands as a release with its proof level.
@@ -104,8 +104,9 @@ CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker D
 Needs a GCP project with L4 quota, `gcloud` and `terraform`. The VM deletes itself after 5 hours whatever happens.
 
 ```bash
+export TF_VAR_project=<gcp-project-id> TF_VAR_billing_account=<billing-account-id>
 make bench-up ZONE=us-west1-a SPOT=false   # g2-standard-12 + RKE2, kubeconfig in ~/k8s_clusters/llm-bench-l4.yaml
-make bench-gpu                             # platform, fp8, gateway, shared, bf16, bf16-64; results in bench/results/<date>-l4
+make bench-gpu                             # platform, fp8, gateway, shared, bf16; results in bench/results/<date>-l4
 make bench-down                            # destroy, then check nothing is left running
 ```
 

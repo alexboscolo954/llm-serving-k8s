@@ -7,7 +7,15 @@ job=bench-$(basename "$out" | tr -c 'a-z0-9\n' -)
 kubectl -n llm delete job "$job" --ignore-not-found
 if [ $# -gt 0 ]; then manifest=$(kubectl set env --local -f bench/job.yaml "$@" -o yaml); else manifest=$(cat bench/job.yaml); fi
 echo "$manifest" | sed "s/name: bench$/name: $job/" | kubectl -n llm apply -f -
-until [ -n "$(kubectl -n llm get job "$job" -o jsonpath='{.status.succeeded}{.status.failed}')" ]; do sleep 10; done
+fails=0   # survive a dropped tunnel, but not a VM that is gone
+while :; do
+  if s=$(kubectl -n llm get job "$job" -o jsonpath='{.status.succeeded}{.status.failed}'); then
+    fails=0; [ -n "$s" ] && break
+  else
+    fails=$((fails + 1)); [ "$fails" -lt 30 ] || { echo "cluster unreachable for 5 minutes"; exit 1; }
+  fi
+  sleep 10
+done
 mkdir -p "$out"
 kubectl -n llm logs "job/$job" > "$out/bench.log"
 [ "$(kubectl -n llm get job "$job" -o jsonpath='{.status.succeeded}')" = 1 ] || { tail -30 "$out/bench.log"; exit 1; }
