@@ -1,0 +1,15 @@
+# Needs the Prometheus Operator CRDs: install platform/kube-prometheus-stack-values.yaml first.
+# No top-level namespace: the monitors and rules live next to the Backends,
+# the dashboard next to Grafana.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - podmonitors.yaml
+  - vllm-rules.yaml
+configMapGenerator:
+  - name: llm-serving-dashboard
+    namespace: monitoring
+    files: [dashboards/llm-serving.json]
+    options:
+      labels: {grafana_dashboard: "1"}
+      disableNameSuffixHash: true

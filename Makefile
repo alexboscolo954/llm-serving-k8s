@@ -10,11 +10,13 @@ TF      := terraform -chdir=bench/infra
 ZONE    ?= us-central1-a
 SPOT    ?= true
 BENCHKC := $(HOME)/k8s_clusters/llm-bench-l4.yaml
+KPS     := kube-prometheus-stack
+CRDS    := https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
 VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up smoke test bench down validate bench-up bench-tunnel bench-gpu bench-down
+.PHONY: up observe smoke test test-observability bench down validate bench-up bench-tunnel bench-gpu bench-down
 
 up: ## kind cluster + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
@@ -22,6 +24,12 @@ up: ## kind cluster + CPU overlay, waits until the models are served
 	kubectl -n $(NS) rollout status deploy/vllm-chat --timeout=15m
 	kubectl -n $(NS) rollout status deploy/vllm-embed --timeout=10m
 	kubectl -n $(NS) rollout status deploy/litellm --timeout=5m
+
+observe: ## Prometheus + Grafana, then scrape the Backends and the Gateway (after `make up`)
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+	helm upgrade --install $(KPS) prometheus-community/kube-prometheus-stack --version 92.10.1 \
+	  -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml --wait --timeout 10m
+	kubectl apply -k observability
 
 smoke: ## chat completion through the LiteLLM gateway
 	@$(GATEWAY) \
@@ -31,7 +39,15 @@ smoke: ## chat completion through the LiteLLM gateway
 	| python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["model"], "->", r["choices"][0]["message"]["content"])'
 
 test: ## e2e tests against the running gateway
-	@$(GATEWAY) $(PYTEST) -v tests
+	@$(GATEWAY) $(PYTEST) -v tests/test_gateway.py
+
+test-observability: ## e2e: targets up, every dashboard query returns data, alert rules loaded
+	@kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & a=$$!; \
+	kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & b=$$!; \
+	kubectl -n monitoring port-forward svc/$(KPS)-grafana 3000:80 >/dev/null & c=$$!; \
+	trap "kill $$a $$b $$c" EXIT; sleep 3; \
+	GRAFANA_PASSWORD=$$(kubectl -n monitoring get secret $(KPS)-grafana -o jsonpath='{.data.admin-password}' | base64 -d) \
+	  $(PYTEST) -v tests/test_observability.py
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
 	bench/run.sh bench/results/$(RUN)
@@ -65,14 +81,21 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	kyverno apply policies/serving.yaml --resource bench/job.yaml
 	kyverno apply policies/serving.yaml --resource policies/violations.yaml 2>&1 | grep -q 'fail: 4,'   # every rule must bite
 	kyverno apply policies/serving.yaml --resource bench/embed-load.yaml
+	kubectl kustomize observability | kubeconform -strict -summary -kubernetes-version $(K8S) -schema-location default -schema-location '$(CRDS)' -
+	d=$$(mktemp -d) && cp observability/vllm-rules.test.yaml $$d/ && \
+	  python3 -c 'import sys,yaml; yaml.safe_dump(yaml.safe_load(open(sys.argv[1]))["spec"], sys.stdout)' observability/vllm-rules.yaml > $$d/vllm-rules.yaml && \
+	  promtool check rules $$d/vllm-rules.yaml && promtool test rules $$d/vllm-rules.test.yaml
 	kubeconform -strict -summary platform/time-slicing-config.yaml bench/job.yaml bench/embed-load.yaml
 	terraform -chdir=bench/infra fmt -check
 	terraform -chdir=bench/infra init -backend=false -input=false >/dev/null && terraform -chdir=bench/infra validate
 	$(PYTEST) -q bench
 	helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null
 	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
-	helm repo update nvidia opencost >/dev/null
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+	helm repo update nvidia opencost prometheus-community >/dev/null
 	helm template gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template opencost opencost/opencost --version 2.5.32 -n opencost -f platform/opencost-values.yaml \
+	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
+	helm template $(KPS) prometheus-community/kube-prometheus-stack --version 92.10.1 -n monitoring -f platform/kube-prometheus-stack-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -

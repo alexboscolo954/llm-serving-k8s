@@ -1,0 +1,44 @@
+# helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.10.1 \
+#   -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml
+# Then: kubectl apply -k observability   (PodMonitors, alert rules, dashboard)
+# Sized to fit next to the CPU Backends on a 4-vCPU kind node.
+
+# No receiver is configured in this repo; alerts are visible in Prometheus.
+alertmanager:
+  enabled: false
+# kind's control-plane components listen on localhost, so these targets are always down there.
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeEtcd: {enabled: false}
+kubeProxy: {enabled: false}
+nodeExporter: {enabled: false}
+defaultRules:
+  rules:
+    alertmanager: false
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    node: false
+    nodeExporterAlerting: false
+    nodeExporterRecording: false
+    windows: false
+
+prometheus:
+  prometheusSpec:
+    # Without these, Prometheus only picks up monitors and rules carrying this release's
+    # label: the vLLM PodMonitors, the alert rules and the GPU Operator's DCGM ServiceMonitor would be ignored.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 2d
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+      limits: {memory: 2Gi}
+
+grafana:
+  # Dashboards come from ConfigMaps labelled grafana_dashboard=1 in any namespace (chart default).
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}

@@ -10,5 +10,7 @@ model_list:
 router_settings:
   num_retries: 2
   timeout: 120
+litellm_settings:
+  callbacks: ["prometheus"]   # serves /metrics/ (needs a valid key)
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

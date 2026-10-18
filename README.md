@@ -30,7 +30,10 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Embeddings on a time-sliced GPU (run next to the chat model in the session) | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#time-slicing-fp8-concurrency-16): chat throughput unchanged; neighbour load level not recorded |
 | Gateway overhead | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#gateway-overhead-fp8-concurrency-16): same throughput and p95, about 400 ms higher mean TTFT |
 | GPU Operator on RKE2, per-node GPU sharing profiles | **Benchmarked** | [`platform/`](platform), [`bench/infra`](bench/infra): installed and used in the session |
-| OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): needs Prometheus (next milestone) |
+| Metrics: Prometheus scrapes both Backends and the Gateway, and every Grafana dashboard query returns data from it | **CI-proven** | [`observability/`](observability), [`tests/test_observability.py`](tests/test_observability.py): checked under live traffic on the kind cluster |
+| Alerts: p95 time to first token, KV cache above 90%, a queue that only grows | **CI-proven** | [`observability/vllm-rules.test.yaml`](observability/vllm-rules.test.yaml): each alert fires on a bad series and stays silent on a good one (`promtool`), and Prometheus loads them in CI. Thresholds are starting points, not tuned on a GPU |
+| GPU metrics (DCGM exporter) | Render-only | [`platform/`](platform): the GPU Operator's ClusterPolicy asks for a DCGM ServiceMonitor (the operator creates it at runtime) and Prometheus accepts monitors from any release. DCGM metrics have never been scraped |
+| OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): points at the Prometheus above, but OpenCost itself has not been run |
 
 - **CI-proven**: runs end-to-end on a kind cluster in CI, CPU only.
 - **Benchmarked**: measured in a recorded session on rented GPUs, with raw results and the exact setup committed.
@@ -55,19 +58,23 @@ Why the split: [ADR-0001](docs/adr/0001-every-claim-is-proven-or-labelled.md).
 Qwen3-8B, vLLM v0.31.0, 1024 input / 256 output tokens, median of 3 runs. At 64 concurrent requests BF16's KV cache holds only about 16 of them; the run did not finish within the VM's time cap.
 Full write-up, method, and the bug this session found in the GPU overlay: [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4).
 
-**Roadmap:** observability, autoscaling, and multi-tenancy. Each lands as a release with its proof level.
+**Roadmap:** autoscaling and multi-tenancy. Each lands as a release with its proof level.
 
 ## Quick start (CPU, about 10 minutes)
 
-Requirements: Docker (8 GB of memory for Docker Desktop), `kind`, `kubectl`, Python 3 with `pytest`.
+Requirements: Docker (8 GB of memory for Docker Desktop), `kind`, `kubectl`, Python 3 with `pytest`; `helm` for `make observe`.
 
 ```bash
 make up      # kind cluster + vLLM chat (Qwen2.5-0.5B) + vLLM embed (bge-small) + LiteLLM
 make smoke   # one chat completion through the gateway
 make test    # e2e tests against the gateway
 make bench   # small load test; table in bench/results/<date>-cpu-kind/results.md
+make observe             # Prometheus + Grafana, scraping the Backends and the Gateway
+make test-observability  # targets up, every dashboard query returns data, alert rules loaded
 make down
 ```
+
+`make observe` has only run on CI's 16 GB runner; next to both Backends it may not fit in Docker Desktop's 8 GB.
 
 Manual call:
 
@@ -89,6 +96,8 @@ CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker D
    kubectl apply -f platform/time-slicing-config.yaml
    helm install gpu-operator nvidia/gpu-operator --version v26.7.1 \
      -n gpu-operator -f platform/gpu-operator-values.yaml
+   helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.10.1 \
+     -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml
    helm install opencost opencost/opencost --version 2.5.32 \
      -n opencost --create-namespace -f platform/opencost-values.yaml
    ```
@@ -97,7 +106,7 @@ CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker D
    kubectl label node <gpu-node-a> nvidia.com/device-plugin.config=dedicated
    kubectl label node <gpu-node-b> nvidia.com/device-plugin.config=shared
    ```
-3. Create the secrets (`litellm-master-key`, and optionally `hf-token`), then `kubectl apply -k overlays/gpu`.
+3. Create the secrets (`litellm-master-key`, and optionally `hf-token`), then `kubectl apply -k overlays/gpu` and `kubectl apply -k observability`.
 
 ### Run a benchmark session
 
@@ -119,6 +128,8 @@ Spot L4s were out of stock in most zones on the first attempt and reclaimed with
 - **Time-slicing shares compute, not memory**: every pod on a shared card caps itself with `--gpu-memory-utilization`, and the caps must add up to less than 1.0. MIG gives hard isolation, but only on some GPUs and in fixed slice sizes.
 - **Cost visibility with OpenCost**: on-prem has no cloud bill, so a custom price sheet (amortized hardware cost) plus per-pod GPU usage from the DCGM exporter.
 - **Gateway in front of everything**: one auth point, retries and model aliases. vLLM backends stay ClusterIP-only, and a policy enforces it.
+- **Metrics from both layers**: vLLM exposes queue length, KV cache usage and time to first token per Backend; LiteLLM's open-source build adds Gateway request and failure counts once `callbacks: ["prometheus"]` is set. Its `/metrics/` endpoint wants a valid key, so the PodMonitor sends one.
+- **Alert on saturation, not load**: a full KV cache or a queue that keeps growing means the Backend is short of capacity. A busy Backend whose queue holds steady does not page anyone.
 - **Startup probes sized for weight downloads**: the chat model's weights sit on a PVC, so restarts don't download them again.
 
 ## Repo layout
@@ -127,7 +138,8 @@ Spot L4s were out of stock in most zones on the first attempt and reclaimed with
 base/                 namespace + LiteLLM gateway (shared)
 overlays/cpu-kind/    vLLM CPU chat + embed, kind config, demo secret
 overlays/gpu/         FP8 chat model (dedicated GPU) + embeddings (time-sliced GPU)
-platform/             GPU Operator, time-slicing config, OpenCost values
+platform/             GPU Operator, time-slicing config, Prometheus stack and OpenCost values
+observability/        PodMonitors, alert rules with their unit tests, Grafana dashboard
 bench/                load-test Job, results table and chart, GPU session script
 bench/infra/          Terraform for the benchmark VM (GCP L4, RKE2)
 tests/                e2e tests against the gateway
@@ -140,9 +152,9 @@ Everything is plain Kustomize and upstream Helm charts with values files. There 
 
 ## Validation
 
-`make validate` needs no cluster. It renders both overlays and both Helm charts, checks them with `kubeconform` and the kyverno CLI, and unit-tests the results generator.
+`make validate` needs no cluster. It renders both overlays, the observability manifests and the three Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`.
 Operator CRDs such as `ClusterPolicy` are skipped (`-ignore-missing-schemas`).
-CI runs `validate` and the CPU end-to-end job on every pull request and on `main`.
+CI runs `validate` and two CPU end-to-end jobs (Gateway, observability), each on its own kind cluster, on every pull request and on `main`.
 
 ## License
 

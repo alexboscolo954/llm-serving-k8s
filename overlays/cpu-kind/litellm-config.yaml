@@ -7,5 +7,7 @@ model_list:
     litellm_params:
       model: hosted_vllm/BAAI/bge-small-en-v1.5
       api_base: http://vllm-embed:8000/v1
+litellm_settings:
+  callbacks: ["prometheus"]   # serves /metrics/ (needs a valid key)
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

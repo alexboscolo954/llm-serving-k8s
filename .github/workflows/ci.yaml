@@ -15,12 +15,13 @@ jobs:
       - uses: azure/setup-helm@v5
       - uses: hashicorp/setup-terraform@v4
         with: {terraform_version: 1.15.5, terraform_wrapper: false}
-      - name: Install kubeconform, kyverno, pytest
+      - name: Install kubeconform, kyverno, promtool, pytest
         run: |
           curl -sL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
           curl -sL https://github.com/kyverno/kyverno/releases/download/v1.19.1/kyverno-cli_v1.19.1_linux_x86_64.tar.gz | tar xz kyverno
-          sudo mv kubeconform kyverno /usr/local/bin/
-          pip install pytest==9.0.2
+          curl -sL https://github.com/prometheus/prometheus/releases/download/v3.15.0/prometheus-3.15.0.linux-amd64.tar.gz | tar xz --strip-components=1 prometheus-3.15.0.linux-amd64/promtool
+          sudo mv kubeconform kyverno promtool /usr/local/bin/
+          pip install pytest==9.0.2 pyyaml==6.0.3
       - run: make validate
 
   e2e-gateway:
@@ -50,4 +51,28 @@ jobs:
           kubectl -n llm describe pods
           kubectl -n llm logs deploy/vllm-chat --tail=200
           kubectl -n llm logs deploy/vllm-embed --tail=100
+          kubectl -n llm logs deploy/litellm --tail=100
+
+  e2e-observability:
+    # Same stack plus kube-prometheus-stack: scraping, dashboard queries and alert rules on a live cluster.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12"}
+      - run: pip install pytest==9.0.2
+      - uses: azure/setup-helm@v5
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: llm-serving
+          config: overlays/cpu-kind/kind-config.yaml
+      - run: make up
+      - run: make observe
+      - run: make test-observability
+      - if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n monitoring describe pods
+          kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
