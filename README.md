@@ -30,9 +30,9 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Embeddings on a time-sliced GPU (run next to the chat model in the session) | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#time-slicing-fp8-concurrency-16): chat throughput unchanged; neighbour load level not recorded |
 | Gateway overhead | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#gateway-overhead-fp8-concurrency-16): same throughput and p95, about 400 ms higher mean TTFT |
 | GPU Operator on RKE2, per-node GPU sharing profiles | **Benchmarked** | [`platform/`](platform), [`bench/infra`](bench/infra): installed and used in the session |
-| Metrics: Prometheus scrapes both Backends and the Gateway, and every Grafana dashboard query returns data | **CI-proven** | [`observability/`](observability), [`tests/test_observability.py`](tests/test_observability.py): checked under live traffic on the kind cluster |
+| Metrics: Prometheus scrapes both Backends and the Gateway, and every Grafana dashboard query returns data from it | **CI-proven** | [`observability/`](observability), [`tests/test_observability.py`](tests/test_observability.py): checked under live traffic on the kind cluster |
 | Alerts: p95 time to first token, KV cache above 90%, a queue that only grows | **CI-proven** | [`observability/vllm-rules.test.yaml`](observability/vllm-rules.test.yaml): each alert fires on a bad series and stays silent on a good one (`promtool`), and Prometheus loads them in CI. Thresholds are starting points, not tuned on a GPU |
-| GPU metrics (DCGM exporter) | Render-only | [`platform/`](platform): the GPU Operator's ServiceMonitor is picked up by the same Prometheus settings; no GPU in CI |
+| GPU metrics (DCGM exporter) | Render-only | [`platform/`](platform): the GPU Operator's ClusterPolicy asks for a DCGM ServiceMonitor (the operator creates it at runtime) and Prometheus accepts monitors from any release. DCGM metrics have never been scraped |
 | OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): points at the Prometheus above, but OpenCost itself has not been run |
 
 - **CI-proven**: runs end-to-end on a kind cluster in CI, CPU only.
@@ -73,6 +73,8 @@ make observe             # Prometheus + Grafana, scraping the Backends and the G
 make test-observability  # targets up, every dashboard query returns data, alert rules loaded
 make down
 ```
+
+`make observe` has only run on CI's 16 GB runner; next to both Backends it may not fit in Docker Desktop's 8 GB.
 
 Manual call:
 

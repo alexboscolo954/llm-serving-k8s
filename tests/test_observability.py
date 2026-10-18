@@ -118,4 +118,6 @@ def test_grafana_has_the_dashboard():
         except urllib.error.HTTPError as e:
             raise AssertionError(e)
         assert len(d["panels"]) == len(json.loads(DASHBOARD.read_text())["panels"])
+        # the datasource the panels name exists, or Grafana shows "datasource not found"
+        assert get(f"{GRAFANA}/api/datasources/uid/prometheus", auth)["type"] == "prometheus"
     eventually(check)
