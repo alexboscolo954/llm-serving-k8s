@@ -1,0 +1,29 @@
+# Selects pods by the labels both Overlays already use, so neither Overlay changes.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vllm
+  namespace: llm
+spec:
+  selector:
+    matchExpressions:
+      - {key: app, operator: In, values: [vllm-chat, vllm-embed]}
+  podMetricsEndpoints:
+    - {port: http, path: /metrics, interval: 15s}
+---
+# LiteLLM serves /metrics/ only with `callbacks: ["prometheus"]`, and only to a valid key.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: litellm
+  namespace: llm
+spec:
+  selector:
+    matchLabels: {app: litellm}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics/   # /metrics answers 307
+      interval: 15s
+      # ponytail: master key, so Prometheus could call the Gateway as admin; a scoped key once Tenants add a DB
+      authorization:
+        credentials: {name: litellm-master-key, key: key}

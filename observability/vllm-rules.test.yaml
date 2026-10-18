@@ -1,0 +1,52 @@
+# promtool test rules, run by `make validate` against the spec of vllm-rules.yaml.
+# Each alert fires for the bad series and stays silent for the good one.
+rule_files: [vllm-rules.yaml]
+evaluation_interval: 1m
+tests:
+  - name: TTFT p95 above 2s
+    interval: 1m
+    input_series:
+      # slow: 9 in 10 requests are fast, the slowest 10% take 2.5-5s (p95 slow, p50 fast)
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="slow",engine="0",le="0.5"}', values: '0+9x20'}
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="slow",engine="0",le="2.5"}', values: '0+9x20'}
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="slow",engine="0",le="5"}', values: '0+10x20'}
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="slow",engine="0",le="+Inf"}', values: '0+10x20'}
+      # fast: every request under 0.5s
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="fast",engine="0",le="0.5"}', values: '0+10x20'}
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="fast",engine="0",le="5"}', values: '0+10x20'}
+      - {series: 'vllm:time_to_first_token_seconds_bucket{model_name="fast",engine="0",le="+Inf"}', values: '0+10x20'}
+    alert_rule_test:
+      - {eval_time: 4m, alertname: VLLMTimeToFirstTokenHigh, exp_alerts: []}   # still pending
+      - eval_time: 15m
+        alertname: VLLMTimeToFirstTokenHigh
+        exp_alerts:
+          - exp_labels: {model_name: slow, severity: warning}
+            exp_annotations: {summary: p95 time to first token above 2s for slow}
+
+  - name: KV cache above 90%, aggregated over engines
+    interval: 1m
+    input_series:
+      - {series: 'vllm:kv_cache_usage_perc{model_name="full",engine="0"}', values: '0.95x20'}
+      - {series: 'vllm:kv_cache_usage_perc{model_name="full",engine="1"}', values: '0.2x20'}
+      - {series: 'vllm:kv_cache_usage_perc{model_name="roomy",engine="0"}', values: '0.5x20'}
+    alert_rule_test:
+      - {eval_time: 4m, alertname: VLLMKVCacheNearlyFull, exp_alerts: []}
+      - eval_time: 10m
+        alertname: VLLMKVCacheNearlyFull
+        exp_alerts:
+          - exp_labels: {model_name: full, severity: warning}
+            exp_annotations: {summary: KV cache above 90% for full}
+
+  - name: queue that only grows, not one that is busy or draining
+    interval: 1m
+    input_series:
+      - {series: 'vllm:num_requests_waiting{model_name="growing",engine="0"}', values: '0+1x30'}
+      - {series: 'vllm:num_requests_waiting{model_name="busy",engine="0"}', values: '5x30'}
+      - {series: 'vllm:num_requests_waiting{model_name="draining",engine="0"}', values: '30-1x30'}
+    alert_rule_test:
+      - {eval_time: 8m, alertname: VLLMQueueGrowing, exp_alerts: []}
+      - eval_time: 25m
+        alertname: VLLMQueueGrowing
+        exp_alerts:
+          - exp_labels: {model_name: growing, severity: warning}
+            exp_annotations: {summary: Waiting requests growing for 10m on growing}
