@@ -22,12 +22,12 @@ DIRECT="BASE_URL=http://vllm-chat:8000 MODEL_NAME=Qwen/Qwen3-8B"
 CHAT_ARGS='["Qwen/Qwen3-8B","--port=8000","--max-model-len=16384"'
 
 chat() {  # chat <extra args json> <gpu profile>: recreate the chat Backend, wait until it serves
-  kubectl -n llm patch deploy vllm-chat --type=json -p "[
+  kubectl -n llm patch sts vllm-chat --type=json -p "[
     {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":$CHAT_ARGS,$1]},
     {\"op\":\"replace\",\"path\":\"/spec/template/spec/nodeSelector/nvidia.com~1device-plugin.config\",\"value\":\"$2\"}]"
-  kubectl -n llm rollout status deploy/vllm-chat --timeout=20m
+  kubectl -n llm rollout status sts/vllm-chat --timeout=20m
   mkdir -p "$out"
-  kubectl -n llm get deploy vllm-chat -o jsonpath='{.spec.template.spec.containers[0].args}' > "$out/$step-chat-args.json"
+  kubectl -n llm get sts vllm-chat -o jsonpath='{.spec.template.spec.containers[0].args}' > "$out/$step-chat-args.json"
 }
 
 gpus() {  # gpus <n>: wait until the node advertises n nvidia.com/gpu
@@ -54,7 +54,7 @@ for step in $steps; do
       --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -k overlays/gpu
     kubectl -n llm scale deploy/vllm-embed --replicas=0   # its shared profile only exists in the shared step
-    kubectl -n llm rollout status deploy/vllm-chat --timeout=20m
+    kubectl -n llm rollout status sts/vllm-chat --timeout=20m
     mkdir -p "$out"
     {
       echo "# Setup, $(date -u +%FT%TZ)"

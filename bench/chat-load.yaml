@@ -1,0 +1,38 @@
+# Steady chat traffic through the Gateway for `make test-autoscaling`: 16 concurrent
+# requests against a Backend that runs 4 at a time, so the rest queue.
+# Runs until deleted; its numbers are not collected.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chat-load
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load
+          image: vllm/vllm-openai-cpu:v0.31.0
+          command:
+            - vllm
+            - bench
+            - serve
+            - --backend=openai-chat
+            - --endpoint=/v1/chat/completions
+            - --base-url=http://litellm:4000
+            - --served-model-name=chat
+            - --model=Qwen/Qwen2.5-0.5B-Instruct
+            - --dataset-name=random
+            - --random-input-len=128
+            - --random-output-len=128
+            - --ignore-eos
+            - --num-prompts=1000000
+            - --max-concurrency=16
+            - --disable-tqdm
+          env:
+            - name: OPENAI_API_KEY   # sent as the Bearer token
+              valueFrom:
+                secretKeyRef: {name: litellm-master-key, key: key}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 2Gi}
