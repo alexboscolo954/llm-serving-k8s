@@ -72,9 +72,11 @@ def eventually(check, timeout=300):
 def test_backends_and_gateway_are_scraped():
     def check():
         targets = get(f"{PROM}/api/v1/targets?state=active")["data"]["activeTargets"]
-        up = {t["labels"]["pod"].rsplit("-", 2)[0] for t in targets
-              if t["scrapePool"].startswith("podMonitor/llm/") and t["health"] == "up"}
-        assert up == {"vllm-chat", "vllm-embed", "litellm"}, up
+        want = {"vllm-chat", "vllm-embed", "litellm"}
+        up = {w for t in targets for w in want
+              if t["scrapePool"].startswith("podMonitor/llm/") and t["health"] == "up"
+              and t["labels"]["pod"].startswith(w + "-")}
+        assert up == want, up
     eventually(check)
 
 

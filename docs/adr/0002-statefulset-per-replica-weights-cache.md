@@ -1,10 +1,10 @@
 ---
-status: proposed   # lands with autoscaling (milestone C); Backends are Deployments until then
+status: accepted   # milestone C; the embed Backend stays a Deployment (small model, not autoscaled)
 ---
 
-# Backends are StatefulSets with a per-replica weights cache
+# Autoscaled Backends are StatefulSets with a per-replica weights cache
 
-vLLM is stateless, but each replica needs several GB of model weights on local disk to start in minutes instead of re-downloading them. Autoscaling a Deployment with one shared ReadWriteOnce PVC breaks as soon as a second replica lands on another node, so Backends run as StatefulSets whose `volumeClaimTemplates` give every replica its own cache. KEDA scales them on queue depth with a minimum of one replica.
+vLLM is stateless, but each replica needs several GB of model weights on local disk to start in minutes instead of re-downloading them. Autoscaling a Deployment with one shared ReadWriteOnce PVC breaks as soon as a second replica lands on another node, so autoscaled Backends (today: chat) run as StatefulSets whose `volumeClaimTemplates` give every replica its own cache. KEDA scales them on queue depth with a minimum of one replica.
 
 ## Considered Options
 

@@ -32,6 +32,8 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | GPU Operator on RKE2, per-node GPU sharing profiles | **Benchmarked** | [`platform/`](platform), [`bench/infra`](bench/infra): installed and used in the session |
 | Metrics: Prometheus scrapes both Backends and the Gateway, and every Grafana dashboard query returns data from it | **CI-proven** | [`observability/`](observability), [`tests/test_observability.py`](tests/test_observability.py): checked under live traffic on the kind cluster |
 | Alerts: p95 time to first token, KV cache above 90%, a queue that only grows | **CI-proven** | [`observability/vllm-rules.test.yaml`](observability/vllm-rules.test.yaml): each alert fires on a bad series and stays silent on a good one (`promtool`), and Prometheus loads them in CI. Thresholds are starting points, not tuned on a GPU |
+| Autoscaling: the chat Backend goes from 1 to 2 replicas when requests queue (KEDA), and the new replica gets its own weights cache | **CI-proven** | [`autoscaling/`](autoscaling), [`tests/test_autoscaling.py`](tests/test_autoscaling.py): under load the queue builds, KEDA adds a replica, it gets its own PVC, becomes Ready and answers a request sent straight to it. The Gateway does not spread load to it yet: in CI's 2-minute window replica 0 served 9 requests through the Gateway, replica 1 none (cause not established) |
+| Autoscaling on GPUs | Render-only | [`overlays/gpu`](overlays/gpu): the same StatefulSet and ScaledObject render and pass the checks, but the Benchmark session had one GPU, so a second replica had nowhere to run |
 | GPU metrics (DCGM exporter) | Render-only | [`platform/`](platform): the GPU Operator's ClusterPolicy asks for a DCGM ServiceMonitor (the operator creates it at runtime) and Prometheus accepts monitors from any release. DCGM metrics have never been scraped |
 | OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): points at the Prometheus above, but OpenCost itself has not been run |
 
@@ -58,7 +60,7 @@ Why the split: [ADR-0001](docs/adr/0001-every-claim-is-proven-or-labelled.md).
 Qwen3-8B, vLLM v0.31.0, 1024 input / 256 output tokens, median of 3 runs. At 64 concurrent requests BF16's KV cache holds only about 16 of them; the run did not finish within the VM's time cap.
 Full write-up, method, and the bug this session found in the GPU overlay: [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4).
 
-**Roadmap:** autoscaling and multi-tenancy. Each lands as a release with its proof level.
+**Roadmap:** multi-tenancy, then routing that sends Gateway traffic to new replicas. Each lands as a release with its proof level.
 
 ## Quick start (CPU, about 10 minutes)
 
@@ -71,10 +73,12 @@ make test    # e2e tests against the gateway
 make bench   # small load test; table in bench/results/<date>-cpu-kind/results.md
 make observe             # Prometheus + Grafana, scraping the Backends and the Gateway
 make test-observability  # targets up, every dashboard query returns data, alert rules loaded
+make autoscale           # KEDA, scaling the chat Backend on its queue (after make observe)
+make test-autoscaling    # load until KEDA adds a chat replica, then check it serves
 make down
 ```
 
-`make observe` has only run on CI's 16 GB runner; next to both Backends it may not fit in Docker Desktop's 8 GB.
+`make observe` and `make autoscale` have only run on CI's 16 GB runner; next to both Backends it may not fit in Docker Desktop's 8 GB.
 
 Manual call:
 
@@ -100,13 +104,14 @@ CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker D
      -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml
    helm install opencost opencost/opencost --version 2.5.32 \
      -n opencost --create-namespace -f platform/opencost-values.yaml
+   helm install keda kedacore/keda --version 2.21.0 -n keda --create-namespace
    ```
 2. Pick which nodes share their GPUs:
    ```bash
    kubectl label node <gpu-node-a> nvidia.com/device-plugin.config=dedicated
    kubectl label node <gpu-node-b> nvidia.com/device-plugin.config=shared
    ```
-3. Create the secrets (`litellm-master-key`, and optionally `hf-token`), then `kubectl apply -k overlays/gpu` and `kubectl apply -k observability`.
+3. Create the secrets (`litellm-master-key`, and optionally `hf-token`), then `kubectl apply -k overlays/gpu`, `kubectl apply -k observability` and `kubectl apply -k autoscaling`.
 
 ### Run a benchmark session
 
@@ -130,6 +135,8 @@ Spot L4s were out of stock in most zones on the first attempt and reclaimed with
 - **Gateway in front of everything**: one auth point, retries and model aliases. vLLM backends stay ClusterIP-only, and a policy enforces it.
 - **Metrics from both layers**: vLLM exposes queue length, KV cache usage and time to first token per Backend; LiteLLM's open-source build adds Gateway request and failure counts once `callbacks: ["prometheus"]` is set. Its `/metrics/` endpoint wants a valid key, so the PodMonitor sends one.
 - **Alert on saturation, not load**: a full KV cache or a queue that keeps growing means the Backend is short of capacity. A busy Backend whose queue holds steady does not page anyone.
+- **Scale on the queue, not on utilization**: a Backend that keeps up runs near 100% GPU and needs nothing; requests waiting in vLLM's queue mean it doesn't keep up. KEDA reads that from Prometheus and adds replicas, minimum one: a GPU cold start takes minutes, so scale-to-zero would leave clients waiting.
+- **Every chat replica has its own weights cache**: the chat Backend is a StatefulSet, so each replica gets its own PVC, and a scaled-down replica finds its weights again when it comes back ([ADR-0002](docs/adr/0002-statefulset-per-replica-weights-cache.md)). Scale-down waits 10 minutes, longer than a cold start.
 - **Startup probes sized for weight downloads**: the chat model's weights sit on a PVC, so restarts don't download them again.
 
 ## Repo layout
@@ -140,6 +147,7 @@ overlays/cpu-kind/    vLLM CPU chat + embed, kind config, demo secret
 overlays/gpu/         FP8 chat model (dedicated GPU) + embeddings (time-sliced GPU)
 platform/             GPU Operator, time-slicing config, Prometheus stack and OpenCost values
 observability/        PodMonitors, alert rules with their unit tests, Grafana dashboard
+autoscaling/          KEDA ScaledObject for the chat Backend
 bench/                load-test Job, results table and chart, GPU session script
 bench/infra/          Terraform for the benchmark VM (GCP L4, RKE2)
 tests/                e2e tests against the gateway
@@ -152,9 +160,9 @@ Everything is plain Kustomize and upstream Helm charts with values files. There 
 
 ## Validation
 
-`make validate` needs no cluster. It renders both overlays, the observability manifests and the three Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`.
+`make validate` needs no cluster. It renders both overlays, the observability manifests and the four Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`.
 Operator CRDs such as `ClusterPolicy` are skipped (`-ignore-missing-schemas`).
-CI runs `validate` and two CPU end-to-end jobs (Gateway, observability), each on its own kind cluster, on every pull request and on `main`.
+CI runs `validate` and three CPU end-to-end jobs (Gateway, observability, autoscaling), each on its own kind cluster, on every pull request and on `main`.
 
 ## License
 

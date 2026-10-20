@@ -49,7 +49,7 @@ jobs:
         run: |
           kubectl -n llm get pods -o wide
           kubectl -n llm describe pods
-          kubectl -n llm logs deploy/vllm-chat --tail=200
+          kubectl -n llm logs sts/vllm-chat --tail=200
           kubectl -n llm logs deploy/vllm-embed --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
 
@@ -73,6 +73,33 @@ jobs:
       - if: failure()
         run: |
           kubectl get pods -A -o wide
-          kubectl -n monitoring describe pods
-          kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100
+          kubectl -n monitoring describe pods || true
+          kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100 || true
+          kubectl -n llm describe pod vllm-chat-0
+          kubectl -n llm logs vllm-chat-0 --previous --tail=100 || kubectl -n llm logs vllm-chat-0 --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
+
+  e2e-autoscaling:
+    # Same stack plus Prometheus and KEDA: under load the chat Backend scales 1 -> 2.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50   # the second CPU replica warms up next to a saturated first one
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12"}
+      - run: pip install pytest==9.0.2
+      - uses: azure/setup-helm@v5
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: llm-serving
+          config: overlays/cpu-kind/kind-config.yaml
+      - run: make up
+      - run: make observe
+      - run: make autoscale
+      - run: make test-autoscaling
+      - if: failure()
+        run: |
+          kubectl -n llm get pods,pvc,hpa,scaledobject -o wide
+          kubectl -n llm describe sts/vllm-chat scaledobject/vllm-chat
+          kubectl -n llm logs vllm-chat-1 --tail=200
+          kubectl -n keda logs deploy/keda-operator --tail=100

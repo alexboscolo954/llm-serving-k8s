@@ -1,11 +1,13 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet   # one weights cache per replica (docs/adr/0002)
 metadata:
   name: vllm-chat
   labels: {app: vllm-chat}
 spec:
-  replicas: 1
-  strategy: {type: Recreate}   # no room for a surge pod in 8 GB of Docker Desktop
+  # No replicas: KEDA owns the count (autoscaling/), a re-apply must not reset it.
+  # Rolling updates replace one pod at a time, deleting before creating: no surge pod.
+  serviceName: vllm-chat
+  podManagementPolicy: Parallel   # a new replica need not wait for the others to be Ready
   selector:
     matchLabels: {app: vllm-chat}
   template:
@@ -21,6 +23,7 @@ spec:
             - --port=8000
             - --dtype=bfloat16
             - --max-model-len=2048
+            - --max-num-seqs=4   # a few CPU cores gain nothing from bigger batches; extra requests queue, KEDA's signal
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
             - {name: VLLM_CPU_OMP_THREADS_BIND, value: nobind}   # "auto" pins to 1 core on a 4-vCPU SMT runner
@@ -42,10 +45,14 @@ spec:
             - {name: hf-cache, mountPath: /root/.cache/huggingface}
             - {name: dshm, mountPath: /dev/shm}
       volumes:
-        - name: hf-cache
-          emptyDir: {}
         - name: dshm
           emptyDir: {medium: Memory, sizeLimit: 1Gi}
+  volumeClaimTemplates:
+    - metadata: {name: hf-cache}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 5Gi}
 ---
 apiVersion: v1
 kind: Service

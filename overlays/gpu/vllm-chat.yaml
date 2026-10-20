@@ -2,13 +2,15 @@
 # FP8 roughly halves weight memory vs BF16, leaving more room for KV cache
 # (needs Ada/Hopper or newer).
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet   # one weights cache per replica (docs/adr/0002)
 metadata:
   name: vllm-chat
   labels: {app: vllm-chat}
 spec:
-  replicas: 1
-  strategy: {type: Recreate}   # one GPU, no room for a surge pod
+  # No replicas: KEDA owns the count (autoscaling/), a re-apply must not reset it.
+  # Rolling updates replace one pod at a time, deleting before creating: no surge pod needing a second GPU.
+  serviceName: vllm-chat
+  podManagementPolicy: Parallel   # a new replica need not wait for the others to be Ready
   selector:
     matchLabels: {app: vllm-chat}
   template:
@@ -49,19 +51,14 @@ spec:
             - {name: hf-cache, mountPath: /root/.cache/huggingface}
             - {name: dshm, mountPath: /dev/shm}
       volumes:
-        - name: hf-cache
-          persistentVolumeClaim: {claimName: vllm-chat-cache}
         - name: dshm
           emptyDir: {medium: Memory, sizeLimit: 8Gi}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: vllm-chat-cache
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests: {storage: 50Gi}
+  volumeClaimTemplates:
+    - metadata: {name: hf-cache}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 50Gi}
 ---
 apiVersion: v1
 kind: Service
