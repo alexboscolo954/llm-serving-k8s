@@ -22,6 +22,10 @@ _Avoid_: alias, model id
 One model server deployment that serves one set of weights behind the Gateway.
 _Avoid_: worker, engine, vLLM pod
 
+**Weights cache**:
+A Backend replica's own volume holding its model weights, so a restart or scale-up loads them from disk instead of downloading them.
+_Avoid_: model cache, PVC (that's the implementation)
+
 ### GPU platform
 
 **Platform layer**:
