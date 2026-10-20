@@ -73,8 +73,10 @@ jobs:
       - if: failure()
         run: |
           kubectl get pods -A -o wide
-          kubectl -n monitoring describe pods
-          kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100
+          kubectl -n monitoring describe pods || true
+          kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100 || true
+          kubectl -n llm describe pod vllm-chat-0
+          kubectl -n llm logs vllm-chat-0 --previous --tail=100 || kubectl -n llm logs vllm-chat-0 --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
 
   e2e-autoscaling:
