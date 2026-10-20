@@ -57,7 +57,7 @@ test-observability: ## e2e: targets up, every dashboard query returns data, aler
 test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weights cache, and it serves
 	kubectl -n $(NS) apply -f bench/chat-load.yaml
 	@kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & p=$$!; \
-	trap "kill $$p; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found" EXIT; sleep 3; \
+	trap "kill $$p; kubectl -n $(NS) logs job/chat-load --tail=20; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found" EXIT; sleep 3; \
 	  $(PYTEST) -v -s tests/test_autoscaling.py
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
