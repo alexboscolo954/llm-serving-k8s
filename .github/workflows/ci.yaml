@@ -106,6 +106,7 @@ jobs:
       - run: make test-autoscaling
       - if: failure()
         run: |
+          set +e   # dump everything, even if a step failed before KEDA was installed
           kubectl -n llm get pods,pvc,hpa,scaledobject -o wide
           kubectl -n llm describe sts/vllm-chat scaledobject/vllm-chat
           make logs-chat
