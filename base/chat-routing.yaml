@@ -112,9 +112,11 @@ spec:
             grpc: {port: 9003, service: inference-extension}
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5   # the default 1 s restarted it on a saturated CPU node
           readinessProbe:
             grpc: {port: 9003, service: inference-extension}
             periodSeconds: 2
+            timeoutSeconds: 5
           resources:   # the chart asks for 8 CPUs; one pool of two replicas needs far less
             requests: {cpu: 100m, memory: 128Mi}
             limits: {memory: 512Mi}

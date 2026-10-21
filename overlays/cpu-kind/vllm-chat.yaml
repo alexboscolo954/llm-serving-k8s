@@ -38,6 +38,7 @@ spec:
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 10
+            timeoutSeconds: 5   # two replicas share 4 vCPUs
           resources:
             requests: {cpu: 500m, memory: 3Gi}   # no CPU limit: uses all cores
             limits: {memory: 6Gi}

@@ -63,7 +63,7 @@ def eventually(check, timeout=300):
     while True:
         try:
             return check()
-        except AssertionError:
+        except (AssertionError, OSError):   # OSError: a starved Prometheus or port-forward times out
             if time.time() > deadline:
                 raise
             time.sleep(10)

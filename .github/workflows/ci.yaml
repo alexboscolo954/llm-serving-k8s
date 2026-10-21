@@ -111,5 +111,9 @@ jobs:
           make logs-chat
           make logs-chat POD=vllm-chat-1
           kubectl -n llm logs deploy/chat-epp --tail=100 || true
+          kubectl -n llm get pods -o custom-columns='POD:.metadata.name,RESTARTS:.status.containerStatuses[*].restartCount,REASON:.status.containerStatuses[*].lastState.terminated.reason,EXIT:.status.containerStatuses[*].lastState.terminated.exitCode'
+          kubectl -n llm get events --sort-by=.lastTimestamp | tail -150
+          for p in deploy/chat-epp deploy/litellm pod/litellm-db-1; do kubectl -n llm logs $p --previous --tail=60 || true; done
+          free -m
           kubectl describe node | sed -n '/Allocated resources/,/Events/p'
           kubectl -n keda logs deploy/keda-operator --tail=100
