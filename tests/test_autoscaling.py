@@ -47,7 +47,8 @@ def test_new_replica_ready_with_its_own_cache():
 def test_gateway_sends_traffic_to_the_new_replica():
     # Runs before the direct request below, so only Gateway traffic counts. Through a Service,
     # LiteLLM's kept-alive connections all stayed on replica 0 (v0.4.0); the Endpoint Picker
-    # chooses a replica per request. Arriving is enough: a starved replica takes minutes to finish.
+    # chooses a replica per request. vLLM updates these gauges after each engine step, so a request
+    # shows once its first step on replica 1 returns.
     def check():
         r = query('max_over_time(vllm:num_requests_running{namespace="llm", pod="vllm-chat-1"}[1m])'
                   ' + max_over_time(vllm:num_requests_waiting{namespace="llm", pod="vllm-chat-1"}[1m]) > 0')
