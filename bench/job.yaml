@@ -14,6 +14,8 @@ metadata:
 spec:
   backoffLimit: 0
   template:
+    metadata:
+      labels: {llm-serving/direct-access: "true"}   # may call Backends without the Gateway (base/network-policies.yaml)
     spec:
       restartPolicy: Never
       containers:

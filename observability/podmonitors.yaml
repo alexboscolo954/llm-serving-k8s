@@ -24,6 +24,7 @@ spec:
     - port: http
       path: /metrics/   # /metrics answers 307
       interval: 15s
-      # ponytail: master key, so Prometheus could call the Gateway as admin; a scoped key once Tenants add a DB
+      # A key that may only read /metrics (base/litellm-metrics-key.yaml). The operator copies it
+      # into Prometheus's config Secret in monitoring, so that must not be the master key.
       authorization:
-        credentials: {name: litellm-master-key, key: key}
+        credentials: {name: litellm-metrics-key, key: key}
