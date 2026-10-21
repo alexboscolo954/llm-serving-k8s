@@ -9,8 +9,8 @@ A Kubernetes Service balances TCP connections, not requests. LiteLLM keeps its c
 ## Considered Options
 
 - **Endpoint Picker in front of LiteLLM**: rejected, the Gateway would lose its place as the single auth and Tenant-limit point, and clients would see two entry points.
-- **Kill LiteLLM's kept-alive connections**: rejected, it spreads load by luck, not by how busy each replica is, and adds a TCP and TLS handshake to every request.
-- **Envoy Gateway, kgateway or agentgateway instead of Istio**: all implement the extension; Istio is the most widely deployed, and here it runs as a gateway only, with no sidecars.
+- **Kill LiteLLM's kept-alive connections**: rejected, it spreads load by luck, not by how busy each replica is, and adds a TCP handshake to every request.
+- **Envoy Gateway, kgateway or agentgateway instead of Istio**: all implement the extension and would work here too. Istio runs as a gateway only, with no sidecars.
 - **Fall back to plain load balancing when the picker is down (FailOpen)**: rejected, a broken picker would look like a working one. FailClose makes chat fail instead, which CI notices.
 
 ## Consequences
