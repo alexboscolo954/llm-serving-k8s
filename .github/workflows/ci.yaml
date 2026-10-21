@@ -25,7 +25,7 @@ jobs:
       - run: make validate
 
   e2e-gateway:
-    # kind + vLLM CPU (chat + embed) + LiteLLM: e2e tests, then a small load test.
+    # kind + vLLM CPU (chat + embed) + LiteLLM and its Postgres: e2e and Tenant tests, then a small load test.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -33,10 +33,12 @@ jobs:
       - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - run: pip install pytest==9.0.2
+      - uses: azure/setup-helm@v5
       - name: Runner size
         run: nproc && free -g
       - uses: helm/kind-action@v1
         with:
+          version: v0.33.0   # kindnet enforces NetworkPolicy; same version as local runs
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
       - run: make up
@@ -49,9 +51,11 @@ jobs:
         run: |
           kubectl -n llm get pods -o wide
           kubectl -n llm describe pods
-          kubectl -n llm logs sts/vllm-chat --tail=200
+          make logs-chat
           kubectl -n llm logs deploy/vllm-embed --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
+          kubectl -n llm get cluster,netpol
+          kubectl -n llm logs job/litellm-metrics-key --tail=20 || true
 
   e2e-observability:
     # Same stack plus kube-prometheus-stack: scraping, dashboard queries and alert rules on a live cluster.
@@ -65,6 +69,7 @@ jobs:
       - uses: azure/setup-helm@v5
       - uses: helm/kind-action@v1
         with:
+          version: v0.33.0   # kindnet enforces NetworkPolicy; same version as local runs
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
       - run: make up
@@ -75,8 +80,7 @@ jobs:
           kubectl get pods -A -o wide
           kubectl -n monitoring describe pods || true
           kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100 || true
-          kubectl -n llm describe pod vllm-chat-0
-          kubectl -n llm logs vllm-chat-0 --previous --tail=100 || kubectl -n llm logs vllm-chat-0 --tail=100
+          make logs-chat
           kubectl -n llm logs deploy/litellm --tail=100
 
   e2e-autoscaling:
@@ -91,6 +95,7 @@ jobs:
       - uses: azure/setup-helm@v5
       - uses: helm/kind-action@v1
         with:
+          version: v0.33.0   # kindnet enforces NetworkPolicy; same version as local runs
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
       - run: make up
@@ -101,5 +106,6 @@ jobs:
         run: |
           kubectl -n llm get pods,pvc,hpa,scaledobject -o wide
           kubectl -n llm describe sts/vllm-chat scaledobject/vllm-chat
-          kubectl -n llm logs vllm-chat-1 --tail=200
+          make logs-chat
+          make logs-chat POD=vllm-chat-1
           kubectl -n keda logs deploy/keda-operator --tail=100

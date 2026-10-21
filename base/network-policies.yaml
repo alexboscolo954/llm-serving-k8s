@@ -1,0 +1,59 @@
+# Nothing in llm takes traffic unless a policy below lets it in.
+# Ingress only: egress (weights downloads, the Gateway calling Backends) is open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# The Gateway is the one public entry point.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+spec:
+  podSelector:
+    matchLabels: {app: litellm}
+  ingress:
+    - ports: [{port: http}]
+---
+# Backends: the Gateway, Prometheus, and pods that opt in with the direct-access label
+# (bench clients comparing engines without the Gateway). Any pod in llm can carry that
+# label, so it is only as strict as whoever may create pods here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backends
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [vllm-chat, vllm-embed]}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: litellm}
+        - podSelector:
+            matchLabels: {llm-serving/direct-access: "true"}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports: [{port: http}]
+---
+# Postgres: the Gateway, and the CNPG operator (instance status on 8000, Postgres on 5432).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-db
+spec:
+  podSelector:
+    matchLabels: {cnpg.io/cluster: litellm-db}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: litellm}
+      ports: [{port: 5432}]
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: cnpg-system}
+      ports: [{port: 8000}, {port: 5432}]

@@ -1,6 +1,7 @@
 CLUSTER := llm-serving
 NS      := llm
 KEY     := sk-local-dev
+POD     ?= vllm-chat-0
 K8S     := 1.33.0
 PYTEST  ?= python3 -m pytest
 RUN     ?= $(shell date +%F)-cpu-kind
@@ -16,14 +17,18 @@ VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up observe autoscale smoke test test-observability test-autoscaling bench down validate bench-up bench-tunnel bench-gpu bench-down
+.PHONY: up observe autoscale smoke test test-observability test-autoscaling logs-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
 
-up: ## kind cluster + CPU overlay, waits until the models are served
+up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
+	helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null
+	helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.1 -n cnpg-system --create-namespace --wait --timeout 10m
 	kubectl apply -k overlays/cpu-kind
+	kubectl -n $(NS) wait --for=condition=Ready cluster/litellm-db --timeout=10m
 	kubectl -n $(NS) rollout status sts/vllm-chat --timeout=15m
 	kubectl -n $(NS) rollout status deploy/vllm-embed --timeout=10m
 	kubectl -n $(NS) rollout status deploy/litellm --timeout=5m
+	kubectl -n $(NS) wait --for=condition=complete job/litellm-metrics-key --timeout=5m
 
 observe: ## Prometheus + Grafana, then scrape the Backends and the Gateway (after `make up`)
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
@@ -43,8 +48,8 @@ smoke: ## chat completion through the LiteLLM gateway
 	  -d '{"model":"chat","max_tokens":32,"messages":[{"role":"user","content":"Say hello in one sentence."}]}' \
 	| python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["model"], "->", r["choices"][0]["message"]["content"])'
 
-test: ## e2e tests against the running gateway
-	@$(GATEWAY) $(PYTEST) -v tests/test_gateway.py
+test: ## e2e tests against the running gateway: routing, Tenants, NetworkPolicies
+	@$(GATEWAY) $(PYTEST) -v tests/test_gateway.py tests/test_tenancy.py
 
 test-observability: ## e2e: targets up, every dashboard query returns data, alert rules loaded
 	@kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & a=$$!; \
@@ -59,6 +64,11 @@ test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weigh
 	@kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & p=$$!; \
 	trap "kill $$p; kubectl -n $(NS) logs job/chat-load --tail=20; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found" EXIT; sleep 3; \
 	  $(PYTEST) -v -s tests/test_autoscaling.py
+
+logs-chat: ## a chat replica's crash, from the previous container's first error (CI failure dumps)
+	-kubectl -n $(NS) describe pod $(POD)
+	-kubectl -n $(NS) logs $(POD) --previous 2>/dev/null | grep -m1 -A150 -E ' ERROR |Traceback' \
+	  || kubectl -n $(NS) logs $(POD) --tail=300
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
 	bench/run.sh bench/results/$(RUN)
@@ -87,7 +97,7 @@ down:
 	kind delete cluster --name $(CLUSTER)
 
 validate: ## render, schema-check and policy-check everything, no cluster needed
-	for o in cpu-kind gpu; do kubectl kustomize overlays/$$o | kubeconform -strict -summary -kubernetes-version $(K8S) - || exit 1; done
+	for o in cpu-kind gpu; do kubectl kustomize overlays/$$o | kubeconform -strict -summary -kubernetes-version $(K8S) -schema-location default -schema-location '$(CRDS)' - || exit 1; done
 	for o in cpu-kind gpu; do kubectl kustomize overlays/$$o | kyverno apply policies/serving.yaml --resource - || exit 1; done
 	kyverno apply policies/serving.yaml --resource bench/job.yaml
 	kyverno apply policies/serving.yaml --resource policies/violations.yaml 2>&1 | grep -q 'fail: 4,'   # every rule must bite
@@ -105,7 +115,8 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
 	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
-	helm repo update nvidia opencost prometheus-community kedacore >/dev/null
+	helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null
+	helm repo update nvidia opencost prometheus-community kedacore cnpg >/dev/null
 	helm template gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template opencost opencost/opencost --version 2.5.32 -n opencost -f platform/opencost-values.yaml \
@@ -113,4 +124,6 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	helm template $(KPS) prometheus-community/kube-prometheus-stack --version 92.10.1 -n monitoring -f platform/kube-prometheus-stack-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template keda kedacore/keda --version 2.21.0 -n keda \
+	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
+	helm template cnpg cnpg/cloudnative-pg --version 0.29.1 -n cnpg-system \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -

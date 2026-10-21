@@ -1,0 +1,46 @@
+# Registers the litellm-metrics-key Secret as a Gateway key that may only read /metrics,
+# so Prometheus never holds the master key. Safe to re-run: an existing key is left alone.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: litellm-metrics-key
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: register
+          image: litellm/litellm:v1.104.2
+          command: [python3, -c]
+          args:
+            - |
+              import json, os, time, urllib.error, urllib.request
+              def call(path, key, body=None):   # keys only ever travel in the header, never in a URL
+                  req = urllib.request.Request("http://litellm:4000" + path, json.dumps(body).encode() if body else None,
+                      {"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+                  return urllib.request.urlopen(req, timeout=10)
+              key = os.environ["METRICS_KEY"]
+              for _ in range(60):   # until the Gateway is up
+                  try:
+                      call("/metrics/", key); print("already registered"); break
+                  except urllib.error.HTTPError as e:
+                      if e.code in (401, 403):   # the Gateway doesn't know this key yet
+                          call("/key/generate", os.environ["MASTER_KEY"],
+                               {"key": key, "key_alias": "prometheus", "allowed_routes": ["/metrics"]})
+                          print("registered"); break
+                  except OSError:
+                      pass
+                  time.sleep(10)
+              else:
+                  raise SystemExit("Gateway never answered")
+          env:
+            - name: MASTER_KEY
+              valueFrom:
+                secretKeyRef: {name: litellm-master-key, key: key}
+            - name: METRICS_KEY
+              valueFrom:
+                secretKeyRef: {name: litellm-metrics-key, key: key}
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {memory: 512Mi}

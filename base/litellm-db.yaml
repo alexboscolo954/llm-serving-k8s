@@ -1,0 +1,15 @@
+# Postgres for the Gateway's keys and Tenants, run by the CloudNativePG operator
+# (Platform layer). CNPG writes the connection string to the litellm-db-app Secret.
+# One instance: if its volume is lost, so are the keys. Add instances for HA.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: litellm-db
+spec:
+  instances: 1
+  storage: {size: 1Gi}
+  bootstrap:
+    initdb: {database: litellm, owner: litellm}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}

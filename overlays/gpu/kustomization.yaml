@@ -12,4 +12,5 @@ configMapGenerator:
     files: [config.yaml=litellm-config.yaml]
 # Secrets created out of band (Vault, External Secrets, sealed-secrets...):
 #   litellm-master-key  key=<gateway master key>
+#   litellm-metrics-key key=sk-<random>, registered as a /metrics-only key for Prometheus
 #   hf-token            token=<Hugging Face token, for gated models>

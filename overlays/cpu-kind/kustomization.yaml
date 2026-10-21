@@ -14,3 +14,6 @@ secretGenerator:
   - name: litellm-master-key
     literals: [key=sk-local-dev]
     options: {disableNameSuffixHash: true}   # same name as the GPU overlay's secret, so bench/job.yaml works on both
+  - name: litellm-metrics-key   # Prometheus's Gateway key, /metrics only (base/litellm-metrics-key.yaml)
+    literals: [key=sk-local-metrics]
+    options: {disableNameSuffixHash: true}

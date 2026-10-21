@@ -44,8 +44,7 @@ def test_embeddings():
 def test_wrong_key_is_rejected():
     with pytest.raises(urllib.error.HTTPError) as e:
         post("/v1/chat/completions", chat(), key="sk-wrong")
-    # ponytail: without a database LiteLLM answers 400 "No connected db"; tighten to 401 once Tenants add Postgres
-    assert e.value.code in (400, 401)
+    assert e.value.code == 401
 
 
 def test_unknown_virtual_model_is_rejected():

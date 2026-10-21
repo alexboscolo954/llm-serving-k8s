@@ -4,3 +4,6 @@ namespace: llm
 resources:
   - namespace.yaml
   - litellm.yaml
+  - litellm-db.yaml
+  - litellm-metrics-key.yaml
+  - network-policies.yaml
