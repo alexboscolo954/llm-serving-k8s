@@ -1,6 +1,7 @@
 CLUSTER := llm-serving
 NS      := llm
 KEY     := sk-local-dev
+POD     ?= vllm-chat-0
 K8S     := 1.33.0
 PYTEST  ?= python3 -m pytest
 RUN     ?= $(shell date +%F)-cpu-kind
@@ -16,7 +17,7 @@ VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up observe autoscale smoke test test-observability test-autoscaling bench down validate bench-up bench-tunnel bench-gpu bench-down
+.PHONY: up observe autoscale smoke test test-observability test-autoscaling logs-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
 
 up: ## kind cluster + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
@@ -59,6 +60,11 @@ test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weigh
 	@kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & p=$$!; \
 	trap "kill $$p; kubectl -n $(NS) logs job/chat-load --tail=20; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found" EXIT; sleep 3; \
 	  $(PYTEST) -v -s tests/test_autoscaling.py
+
+logs-chat: ## a chat replica's crash, from the previous container's first error (CI failure dumps)
+	-kubectl -n $(NS) describe pod $(POD)
+	-kubectl -n $(NS) logs $(POD) --previous 2>/dev/null | grep -m1 -A150 -E ' ERROR |Traceback' \
+	  || kubectl -n $(NS) logs $(POD) --tail=300
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
 	bench/run.sh bench/results/$(RUN)

@@ -49,7 +49,7 @@ jobs:
         run: |
           kubectl -n llm get pods -o wide
           kubectl -n llm describe pods
-          kubectl -n llm logs sts/vllm-chat --tail=200
+          make logs-chat
           kubectl -n llm logs deploy/vllm-embed --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
 
@@ -75,8 +75,7 @@ jobs:
           kubectl get pods -A -o wide
           kubectl -n monitoring describe pods || true
           kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100 || true
-          kubectl -n llm describe pod vllm-chat-0
-          kubectl -n llm logs vllm-chat-0 --previous --tail=100 || kubectl -n llm logs vllm-chat-0 --tail=100
+          make logs-chat
           kubectl -n llm logs deploy/litellm --tail=100
 
   e2e-autoscaling:
@@ -101,5 +100,6 @@ jobs:
         run: |
           kubectl -n llm get pods,pvc,hpa,scaledobject -o wide
           kubectl -n llm describe sts/vllm-chat scaledobject/vllm-chat
-          kubectl -n llm logs vllm-chat-1 --tail=200
+          make logs-chat
+          make logs-chat POD=vllm-chat-1
           kubectl -n keda logs deploy/keda-operator --tail=100
