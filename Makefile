@@ -75,10 +75,12 @@ test-observability: ## e2e: targets up, every dashboard query returns data, aler
 	GRAFANA_PASSWORD=$$(kubectl -n monitoring get secret $(KPS)-grafana -o jsonpath='{.data.admin-password}' | base64 -d) \
 	  $(PYTEST) -v tests/test_observability.py
 
-test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weights cache, and it serves
+test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weights cache, and the Gateway uses it
+	kubectl -n $(NS) scale deploy/vllm-embed --replicas=0   # unused here; two chat replicas need its memory on a 16 GB node
 	kubectl -n $(NS) apply -f bench/chat-load.yaml
-	@kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & p=$$!; \
-	trap "kill $$p; kubectl -n $(NS) logs job/chat-load --tail=20; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found" EXIT; sleep 3; \
+	@kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & a=$$!; \
+	kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & p=$$!; \
+	trap "kill $$a $$p; kubectl -n $(NS) logs job/chat-load --tail=20; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found; kubectl -n $(NS) scale deploy/vllm-embed --replicas=1" EXIT; sleep 3; \
 	  $(PYTEST) -v -s tests/test_autoscaling.py
 
 logs-chat: ## a chat replica's crash, from the previous container's first error (CI failure dumps)
