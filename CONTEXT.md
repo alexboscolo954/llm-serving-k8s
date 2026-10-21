@@ -22,6 +22,10 @@ _Avoid_: alias, model id
 One model server deployment that serves one set of weights behind the Gateway.
 _Avoid_: worker, engine, vLLM pod
 
+**Endpoint Picker**:
+Chooses, for each request, which replica of a Backend serves it, from each replica's queue and KV cache. It sits behind the Gateway: an Istio gateway asks it before forwarding a chat request.
+_Avoid_: EPP, scheduler, load balancer (a load balancer picks per connection)
+
 **Weights cache**:
 A Backend replica's own volume holding its model weights, so a restart or scale-up loads them from disk instead of downloading them.
 _Avoid_: model cache, PVC (that's the implementation)
