@@ -16,17 +16,18 @@ spec:
           args:
             - |
               import json, os, time, urllib.error, urllib.request
-              def call(path, body=None):
+              def call(path, key, body=None):   # keys only ever travel in the header, never in a URL
                   req = urllib.request.Request("http://litellm:4000" + path, json.dumps(body).encode() if body else None,
-                      {"Authorization": "Bearer " + os.environ["MASTER_KEY"], "Content-Type": "application/json"})
+                      {"Authorization": "Bearer " + key, "Content-Type": "application/json"})
                   return urllib.request.urlopen(req, timeout=10)
               key = os.environ["METRICS_KEY"]
               for _ in range(60):   # until the Gateway is up
                   try:
-                      call("/key/info?key=" + key); print("already registered"); break
+                      call("/metrics/", key); print("already registered"); break
                   except urllib.error.HTTPError as e:
-                      if e.code < 500:   # unknown key
-                          call("/key/generate", {"key": key, "key_alias": "prometheus", "allowed_routes": ["/metrics"]})
+                      if e.code in (401, 403):   # the Gateway doesn't know this key yet
+                          call("/key/generate", os.environ["MASTER_KEY"],
+                               {"key": key, "key_alias": "prometheus", "allowed_routes": ["/metrics"]})
                           print("registered"); break
                   except OSError:
                       pass
