@@ -54,7 +54,9 @@ jobs:
           make logs-chat
           kubectl -n llm logs deploy/vllm-embed --tail=100
           kubectl -n llm logs deploy/litellm --tail=100
-          kubectl -n llm get cluster,netpol
+          kubectl -n llm get cluster,netpol,gateway,httproute,inferencepool
+          kubectl -n llm logs deploy/chat-epp --tail=100 || true
+          kubectl -n llm logs deploy/inference-gateway-istio --tail=50 || true
           kubectl -n llm logs job/litellm-metrics-key --tail=20 || true
 
   e2e-observability:
@@ -108,4 +110,6 @@ jobs:
           kubectl -n llm describe sts/vllm-chat scaledobject/vllm-chat
           make logs-chat
           make logs-chat POD=vllm-chat-1
+          kubectl -n llm logs deploy/chat-epp --tail=100 || true
+          kubectl describe node | sed -n '/Allocated resources/,/Events/p'
           kubectl -n keda logs deploy/keda-operator --tail=100

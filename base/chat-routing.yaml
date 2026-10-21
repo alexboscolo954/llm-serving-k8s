@@ -1,0 +1,172 @@
+# Inference-aware routing for the chat Backend (Gateway API Inference Extension).
+# LiteLLM sends chat to an Istio gateway; for every request the gateway asks the
+# Endpoint Picker (EPP) which vLLM replica to use, and the EPP picks by each replica's
+# queue and KV cache, read from its /metrics. A Service balances TCP connections
+# instead, and LiteLLM's kept-alive connections all stayed on the first replica.
+# EPP parts adapted from the llm-d-router-gateway chart v0.11.0 (provider: istio).
+# Needs Istio and the Gateway API / Inference Extension CRDs (Platform layer, `make up`).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: inference-gateway
+  annotations:
+    networking.istio.io/service-type: ClusterIP   # only LiteLLM calls it
+spec:
+  gatewayClassName: istio
+  listeners:
+    - {name: http, port: 80, protocol: HTTP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: chat
+spec:
+  parentRefs:
+    - name: inference-gateway
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /v1}
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: vllm-chat
+---
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: vllm-chat
+spec:
+  selector:
+    matchLabels: {app: vllm-chat}
+  targetPorts:
+    - number: 8000
+  endpointPickerRef:
+    name: chat-epp
+    port: {number: 9002}
+    # Requests fail rather than skip the EPP: a broken picker must not hide behind
+    # the gateway's own load balancing.
+    failureMode: FailClose
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chat-epp
+data:
+  # Queue depth and KV cache only. The chart's default also scores prefix-cache hits
+  # (top weight), which keeps repeated prompts on the replica that has seen them.
+  plugins.yaml: |
+    apiVersion: llm-d.ai/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+    - type: queue-scorer
+    - type: kv-cache-utilization-scorer
+    - type: metrics-data-source
+      parameters:
+        scheme: "http"
+        path: "/metrics"
+    - type: core-metrics-extractor
+    schedulingProfiles:
+    - name: default
+      plugins:
+      - pluginRef: queue-scorer
+        weight: 2
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-epp
+  labels: {app: chat-epp}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # one active picker
+  selector:
+    matchLabels: {app: chat-epp}
+  template:
+    metadata:
+      labels: {app: chat-epp}
+    spec:
+      serviceAccountName: chat-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0
+          args:
+            - --pool-name=vllm-chat
+            - --pool-namespace=llm
+            - --pool-group=inference.networking.k8s.io
+            - --config-file=/config/plugins.yaml
+            - --grpc-health-port=9003
+            - --zap-encoder=json
+            - --tracing=false
+          env:
+            - name: NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          ports:
+            - {name: grpc, containerPort: 9002}
+            - {name: grpc-health, containerPort: 9003}
+            - {name: metrics, containerPort: 9090}
+          livenessProbe:
+            grpc: {port: 9003, service: inference-extension}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc: {port: 9003, service: inference-extension}
+            periodSeconds: 2
+          resources:   # the chart asks for 8 CPUs; one pool of two replicas needs far less
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+      volumes:
+        - name: config
+          configMap: {name: chat-epp}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-epp
+spec:
+  selector: {app: chat-epp}
+  ports:
+    - {name: grpc-ext-proc, port: 9002, appProtocol: kubernetes.io/h2c}
+---
+# The EPP serves ext-proc over TLS with a self-signed certificate.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: chat-epp
+spec:
+  host: chat-epp.llm.svc.cluster.local
+  trafficPolicy:
+    tls: {mode: SIMPLE, insecureSkipVerify: true}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chat-epp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chat-epp
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, watch, list]
+  - apiGroups: [inference.networking.k8s.io]
+    resources: [inferencepools]
+    verbs: [get, watch, list]
+  - apiGroups: [inference.networking.x-k8s.io, llm-d.ai]
+    resources: [inferenceobjectives, inferencemodelrewrites]
+    verbs: [get, watch, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chat-epp
+subjects:
+  - {kind: ServiceAccount, name: chat-epp, namespace: llm}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: chat-epp}
