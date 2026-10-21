@@ -2,6 +2,7 @@
 Prometheus). Under load the chat Backend's queue builds, KEDA adds a second replica, and
 that replica gets its own weights cache and serves. Tests run in order."""
 import json
+import socket
 import subprocess
 import time
 import urllib.request
@@ -47,7 +48,12 @@ def test_new_replica_serves():
     pf = subprocess.Popen(["kubectl", "-n", "llm", "port-forward", "pod/vllm-chat-1", "8001:8000"],
                           stdout=subprocess.DEVNULL)
     try:
-        time.sleep(3)
+        for _ in range(60):   # kubectl is slow to listen on a runner saturated by two CPU replicas
+            try:
+                socket.create_connection(("localhost", 8001), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(1)
         req = urllib.request.Request(
             "http://localhost:8001/v1/chat/completions",
             data=json.dumps(chat(model="Qwen/Qwen2.5-0.5B-Instruct")).encode(),
