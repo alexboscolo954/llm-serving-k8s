@@ -58,7 +58,10 @@ def test_new_replica_serves():
             "http://localhost:8001/v1/chat/completions",
             data=json.dumps(chat(model="Qwen/Qwen2.5-0.5B-Instruct")).encode(),
             headers={"Content-Type": "application/json"})
-        r = json.load(urllib.request.urlopen(req, timeout=300))
+        # Replica 0 keeps all 4 vCPUs busy, so one short request here took 4-5 minutes in CI.
+        start = time.time()
+        r = json.load(urllib.request.urlopen(req, timeout=900))
+        print(f"\nreplica 1 answered in {time.time() - start:.0f}s")
         assert r["choices"][0]["message"]["content"]
     finally:
         pf.terminate()
