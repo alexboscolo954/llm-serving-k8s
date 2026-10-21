@@ -11,8 +11,8 @@ The single entry point clients call; it authenticates and maps a Virtual model t
 _Avoid_: proxy, router, LiteLLM (that's the implementation)
 
 **Tenant**:
-An isolated consumer of the Gateway with its own keys, rate limits, and budget.
-_Avoid_: team, user, customer, client
+An isolated consumer of the Gateway with its own keys, rate limits, and budget. Implemented as a LiteLLM team; budgets are not enforced yet.
+_Avoid_: team (that's the implementation), user, customer, client
 
 **Virtual model**:
 The stable model name a client asks for (`chat`, `embed`), independent of which weights or hardware serve it.

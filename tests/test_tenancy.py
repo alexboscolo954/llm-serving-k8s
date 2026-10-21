@@ -39,7 +39,7 @@ def test_tenant_over_its_limit_gets_429_and_another_tenant_does_not():
 def test_metrics_key_reads_metrics_and_nothing_else():
     req = urllib.request.Request(URL + "/metrics/", headers={"Authorization": f"Bearer {METRICS_KEY}"})
     assert urllib.request.urlopen(req, timeout=30).status == 200
-    assert status("/v1/chat/completions", chat(), METRICS_KEY) == 401
+    assert status("/v1/chat/completions", chat(), METRICS_KEY) == 403   # known key, route not allowed
 
 
 def reach(url, direct_access):

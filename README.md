@@ -10,6 +10,7 @@ flowchart LR
   client[Client<br/>OpenAI SDK / curl] -->|model: chat / embed| gw[LiteLLM gateway<br/>auth, routing, retries]
   gw --> chat[vLLM: chat model]
   gw --> embed[vLLM: embedding model]
+  gw --- db[(Postgres<br/>keys, Tenants)]
   subgraph gpu [GPU overlay]
     chat -.->|dedicated GPU, FP8| g1[(GPU)]
     embed -.->|time-sliced GPU| g2[(GPU)]
@@ -24,6 +25,10 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Feature | Proof level | Evidence |
 |---|---|---|
 | Gateway routes two virtual models to vLLM backends | **CI-proven** | [`tests/`](tests): chat, streaming, embeddings, bad key and unknown model rejected |
+| Tenants: each has its own keys and a requests-per-minute limit; one over its limit gets 429 while another keeps getting answers | **CI-proven** | [`tests/test_tenancy.py`](tests/test_tenancy.py): two Tenants (LiteLLM teams) created through the Gateway's admin API |
+| Gateway keys in Postgres (CloudNativePG, one instance); unknown keys get 401 | **CI-proven** | [`base/litellm-db.yaml`](base/litellm-db.yaml), [`tests/test_gateway.py`](tests/test_gateway.py) |
+| Backends only take traffic from the Gateway, Prometheus and pods labelled `llm-serving/direct-access=true` (NetworkPolicy, default deny) | **CI-proven** | [`base/network-policies.yaml`](base/network-policies.yaml), [`tests/test_tenancy.py`](tests/test_tenancy.py): a labelled pod reaches each Backend, an unlabelled one does not. Any pod in `llm` can set the label, so it is only as strict as pod creation there |
+| Prometheus reads the Gateway's metrics with a key that can do nothing else | **CI-proven** | [`base/litellm-metrics-key.yaml`](base/litellm-metrics-key.yaml): the key reads `/metrics/` and gets 403 on chat; the observability job scrapes with it |
 | Load-test harness (`vllm bench serve` as a Job) | **CI-proven** | [`bench/`](bench): runs through the gateway on every PR; CPU numbers check the harness, they are not a benchmark |
 | Manifest rules: probes, memory limits, GPU requests, backends ClusterIP-only, pinned images | **CI-proven** | [`policies/`](policies): checked on every rendered overlay, and each rule is shown to fail on a broken manifest |
 | FP8 chat model on a dedicated GPU: +56–60% throughput over BF16, 3.3× the KV cache | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4): 1× L4, 3 repeats per point |
@@ -34,6 +39,7 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Alerts: p95 time to first token, KV cache above 90%, a queue that only grows | **CI-proven** | [`observability/vllm-rules.test.yaml`](observability/vllm-rules.test.yaml): each alert fires on a bad series and stays silent on a good one (`promtool`), and Prometheus loads them in CI. Thresholds are starting points, not tuned on a GPU |
 | Autoscaling: the chat Backend goes from 1 to 2 replicas when requests queue (KEDA), and the new replica gets its own weights cache | **CI-proven** | [`autoscaling/`](autoscaling), [`tests/test_autoscaling.py`](tests/test_autoscaling.py): under load the queue builds, KEDA adds a replica, it gets its own PVC, becomes Ready and answers a request sent straight to it. The Gateway does not spread load to it yet: in CI's 2-minute window replica 0 served 9 requests through the Gateway, replica 1 none (cause not established) |
 | Autoscaling on GPUs | Render-only | [`overlays/gpu`](overlays/gpu): the same StatefulSet and ScaledObject render and pass the checks, but the Benchmark session had one GPU, so a second replica had nowhere to run |
+| Postgres and NetworkPolicies on the GPU cluster (RKE2, Canal CNI) | Render-only | [`bench/session.sh`](bench/session.sh) installs them, but no Benchmark session has run since |
 | GPU metrics (DCGM exporter) | Render-only | [`platform/`](platform): the GPU Operator's ClusterPolicy asks for a DCGM ServiceMonitor (the operator creates it at runtime) and Prometheus accepts monitors from any release. DCGM metrics have never been scraped |
 | OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): points at the Prometheus above, but OpenCost itself has not been run |
 
@@ -60,16 +66,16 @@ Why the split: [ADR-0001](docs/adr/0001-every-claim-is-proven-or-labelled.md).
 Qwen3-8B, vLLM v0.31.0, 1024 input / 256 output tokens, median of 3 runs. At 64 concurrent requests BF16's KV cache holds only about 16 of them; the run did not finish within the VM's time cap.
 Full write-up, method, and the bug this session found in the GPU overlay: [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4).
 
-**Roadmap:** multi-tenancy, then routing that sends Gateway traffic to new replicas. Each lands as a release with its proof level.
+**Roadmap:** routing that sends Gateway traffic to new replicas. Each lands as a release with its proof level.
 
 ## Quick start (CPU, about 10 minutes)
 
-Requirements: Docker (8 GB of memory for Docker Desktop), `kind`, `kubectl`, Python 3 with `pytest`; `helm` for `make observe`.
+Requirements: Docker (8 GB of memory for Docker Desktop), `kind`, `kubectl`, `helm`, Python 3 with `pytest`.
 
 ```bash
-make up      # kind cluster + vLLM chat (Qwen2.5-0.5B) + vLLM embed (bge-small) + LiteLLM
+make up      # kind cluster + vLLM chat (Qwen2.5-0.5B) + vLLM embed (bge-small) + LiteLLM and its Postgres
 make smoke   # one chat completion through the gateway
-make test    # e2e tests against the gateway
+make test    # e2e tests: routing, Tenants, NetworkPolicies
 make bench   # small load test; table in bench/results/<date>-cpu-kind/results.md
 make observe             # Prometheus + Grafana, scraping the Backends and the Gateway
 make test-observability  # targets up, every dashboard query returns data, alert rules loaded
@@ -105,13 +111,14 @@ CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker D
    helm install opencost opencost/opencost --version 2.5.32 \
      -n opencost --create-namespace -f platform/opencost-values.yaml
    helm install keda kedacore/keda --version 2.21.0 -n keda --create-namespace
+   helm install cnpg cnpg/cloudnative-pg --version 0.29.1 -n cnpg-system --create-namespace
    ```
 2. Pick which nodes share their GPUs:
    ```bash
    kubectl label node <gpu-node-a> nvidia.com/device-plugin.config=dedicated
    kubectl label node <gpu-node-b> nvidia.com/device-plugin.config=shared
    ```
-3. Create the secrets (`litellm-master-key`, and optionally `hf-token`), then `kubectl apply -k overlays/gpu`, `kubectl apply -k observability` and `kubectl apply -k autoscaling`.
+3. Create the secrets (`litellm-master-key`, `litellm-metrics-key`, and optionally `hf-token`), then `kubectl apply -k overlays/gpu`, `kubectl apply -k observability` and `kubectl apply -k autoscaling`.
 
 ### Run a benchmark session
 
@@ -133,16 +140,18 @@ Spot L4s were out of stock in most zones on the first attempt and reclaimed with
 - **Time-slicing shares compute, not memory**: every pod on a shared card caps itself with `--gpu-memory-utilization`, and the caps must add up to less than 1.0. MIG gives hard isolation, but only on some GPUs and in fixed slice sizes.
 - **Cost visibility with OpenCost**: on-prem has no cloud bill, so a custom price sheet (amortized hardware cost) plus per-pod GPU usage from the DCGM exporter.
 - **Gateway in front of everything**: one auth point, retries and model aliases. vLLM backends stay ClusterIP-only, and a policy enforces it.
-- **Metrics from both layers**: vLLM exposes queue length, KV cache usage and time to first token per Backend; LiteLLM's open-source build adds Gateway request and failure counts once `callbacks: ["prometheus"]` is set. Its `/metrics/` endpoint wants a valid key, so the PodMonitor sends one.
+- **Metrics from both layers**: vLLM exposes queue length, KV cache usage and time to first token per Backend; LiteLLM's open-source build adds Gateway request and failure counts once `callbacks: ["prometheus"]` is set. Its `/metrics/` endpoint wants a valid key, so the PodMonitor sends one that may only read metrics: the Prometheus Operator copies it into a Secret in `monitoring`, where the master key has no business.
 - **Alert on saturation, not load**: a full KV cache or a queue that keeps growing means the Backend is short of capacity. A busy Backend whose queue holds steady does not page anyone.
 - **Scale on the queue, not on utilization**: a Backend that keeps up runs near 100% GPU and needs nothing; requests waiting in vLLM's queue mean it doesn't keep up. KEDA reads that from Prometheus and adds replicas, minimum one: a GPU cold start takes minutes, so scale-to-zero would leave clients waiting.
 - **Every chat replica has its own weights cache**: the chat Backend is a StatefulSet, so each replica gets its own PVC, and a scaled-down replica finds its weights again when it comes back ([ADR-0002](docs/adr/0002-statefulset-per-replica-weights-cache.md)). Scale-down waits 10 minutes, longer than a cold start.
+- **Tenants are Gateway teams**: a Tenant is a LiteLLM team with its own keys and limits, stored in Postgres. No per-Tenant Kubernetes objects, so adding one is an API call, not a deploy.
+- **NetworkPolicies on ingress only**: nothing in `llm` takes traffic unless a policy lets it in. Egress stays open, because Backends download weights and the Gateway calls them.
 - **Startup probes sized for weight downloads**: the chat model's weights sit on a PVC, so restarts don't download them again.
 
 ## Repo layout
 
 ```
-base/                 namespace + LiteLLM gateway (shared)
+base/                 namespace, LiteLLM gateway, its Postgres, NetworkPolicies (shared)
 overlays/cpu-kind/    vLLM CPU chat + embed, kind config, demo secret
 overlays/gpu/         FP8 chat model (dedicated GPU) + embeddings (time-sliced GPU)
 platform/             GPU Operator, time-slicing config, Prometheus stack and OpenCost values
@@ -160,7 +169,7 @@ Everything is plain Kustomize and upstream Helm charts with values files. There 
 
 ## Validation
 
-`make validate` needs no cluster. It renders both overlays, the observability manifests and the four Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`.
+`make validate` needs no cluster. It renders both overlays, the observability manifests and the five Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`.
 Operator CRDs such as `ClusterPolicy` are skipped (`-ignore-missing-schemas`).
 CI runs `validate` and three CPU end-to-end jobs (Gateway, observability, autoscaling), each on its own kind cluster, on every pull request and on `main`.
 
