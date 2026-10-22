@@ -157,6 +157,9 @@ for step in $steps; do
     kubectl -n llm logs deploy/vllm-embed | grep 'Engine 000' > "$out/shared-busy/vllm-embed-stats.log"
     ;;
   cost)  # chat holds the whole GPU (dedicated profile) for 10 minutes
+    kubectl -n llm scale deploy/vllm-embed --replicas=0   # its shared profile only exists in cost-shared
+    kubectl label node "$node" nvidia.com/device-plugin.config=dedicated --overwrite
+    gpus 1
     chat '"--quantization=fp8","--gpu-memory-utilization=0.90"' dedicated
     sleep 600
     cost cost-dedicated

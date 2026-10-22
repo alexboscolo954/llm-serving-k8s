@@ -1,0 +1,13 @@
+[1m============================= test session starts ==============================[0m
+platform darwin -- Python 3.12.4, pytest-9.0.2, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/alex.boscolo/llm-serving-k8s
+plugins: anyio-4.14.0
+[1mcollecting ... [0mcollected 2 items
+
+tests/test_cost.py::test_node_prices_come_from_the_price_sheet [32mPASSED[0m
+tests/test_cost.py::test_each_backend_costs_its_hours_at_sheet_prices 
+cost per Backend, last 10 minutes (USD): {'vllm-chat-0': 0.2753, 'vllm-embed-57d4bcd454-fh2sh': 0.2135}
+[32mPASSED[0m
+
+[32m============================== [32m[1m2 passed[0m[32m in 4.30s[0m[32m ===============================[0m
