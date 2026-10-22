@@ -101,6 +101,7 @@ curl http://localhost:4000/v1/chat/completions \
 
 It's the same OpenAI-compatible server the GPU overlay uses, just slow.
 CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker Desktop) the chat model's CPU warmup can stall past the startup probe.
+The CPU Backends run without Triton-CPU, on vLLM's V1 model runner. Triton-CPU builds kernels for the CPU model's name. Some CI runners are EPYC 9V74 VMs that hide AVX-512, and on those every Triton kernel died with an illegal instruction ([PR #10](https://github.com/alexboscolo954/llm-serving-k8s/pull/10)).
 
 ## GPU deployment
 

@@ -5,3 +5,4 @@ bench/results/*-cpu-kind/
 # Terraform working state for the bench VM (the lock file is committed)
 bench/infra/.terraform/
 bench/infra/terraform.tfstate*
+chat-0.log

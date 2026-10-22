@@ -24,7 +24,7 @@ def backends():
     """This window's allocation per pod in `llm`, Backends (vllm-*) only."""
     q = urllib.parse.urlencode({"window": "10m", "aggregate": "pod", "filter": 'namespace:"llm"'})
     with urllib.request.urlopen(f"{OPENCOST}/allocation?{q}", timeout=30) as r:
-        data = json.load(r)["data"][0] or {}
+        data = (json.load(r)["data"] or [{}])[0] or {}   # a fresh OpenCost has no window yet: retried by the caller
     return {pod: a for pod, a in data.items() if pod.startswith("vllm-")}
 
 

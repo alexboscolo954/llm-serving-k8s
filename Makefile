@@ -22,7 +22,7 @@ VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up platform observe cost autoscale smoke test test-observability test-autoscaling logs-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
+.PHONY: up platform observe cost autoscale smoke test test-observability test-autoscaling logs-chat follow-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
 
 up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
@@ -32,7 +32,9 @@ up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kubectl -n $(NS) rollout status deploy/chat-epp --timeout=5m
 	kubectl -n $(NS) wait --for=condition=Ready cluster/litellm-db --timeout=10m
 	kubectl -n $(NS) rollout status sts/vllm-chat --timeout=15m
+	kubectl -n $(NS) logs vllm-chat-0 | grep -m1 'Disabling Triton'   # Triton-CPU is off (vllm-chat.yaml)
 	kubectl -n $(NS) rollout status deploy/vllm-embed --timeout=10m
+	kubectl -n $(NS) logs deploy/vllm-embed | grep -m1 'Disabling Triton'
 	kubectl -n $(NS) rollout status deploy/litellm --timeout=5m
 	kubectl -n $(NS) wait --for=condition=complete job/litellm-metrics-key --timeout=5m
 
@@ -89,13 +91,17 @@ test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weigh
 	trap "kill $$a $$p; kubectl -n $(NS) logs job/chat-load --tail=20; kubectl -n $(NS) delete -f bench/chat-load.yaml --ignore-not-found; kubectl -n $(NS) scale deploy/vllm-embed --replicas=1" EXIT; sleep 3; \
 	  $(PYTEST) -v -s tests/test_autoscaling.py
 
-logs-chat: ## a chat replica's crash, from the previous container's first error (CI failure dumps)
+logs-chat: ## a chat replica's crash: the previous container's log, /dev/shm, kernel kills (CI failure dumps)
 	-kubectl -n $(NS) describe pod $(POD)
-	-kubectl -n $(NS) logs $(POD) --previous 2>/dev/null | grep -m1 -A150 -E ' ERROR |Traceback' \
-	  || kubectl -n $(NS) logs $(POD) --tail=300
-	@# A dead vLLM worker: the 6Gi limit (kernel OOM kill) or a full /dev/shm (memory-backed, survives restarts)?
-	-kubectl -n $(NS) exec $(POD) -- sh -c 'cat /sys/fs/cgroup/memory.events; df -h /dev/shm; ls -la /dev/shm'
-	-sudo -n dmesg -T 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -20
+	@# The worker dies before the engine logs its first ERROR: keep what came before it.
+	-kubectl -n $(NS) logs $(POD) --previous --tail=400 2>/dev/null || kubectl -n $(NS) logs $(POD) --tail=400
+	@# /dev/shm is memory-backed and survives container restarts
+	-kubectl -n $(NS) exec $(POD) -- sh -c 'df -h /dev/shm; ls -la /dev/shm'
+	@# kind shares the runner's kernel: OOM kills and native crashes (SIGILL, SIGSEGV) land here
+	-sudo -n dmesg -T | awk 'tolower($$0) ~ /out of memory|oom-kill|killed process|segfault|traps:|invalid opcode|general protection/; END {print NR " kernel log lines read"}'
+
+follow-chat: ## CI: append every vllm-chat-0 container's log to chat-0.log (`--previous` keeps only the last one)
+	while :; do kubectl -n $(NS) logs -f --timestamps vllm-chat-0 2>/dev/null; sleep 5; done >> chat-0.log
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
 	bench/run.sh bench/results/$(RUN)
