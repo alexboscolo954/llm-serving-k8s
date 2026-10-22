@@ -87,6 +87,9 @@ logs-chat: ## a chat replica's crash, from the previous container's first error 
 	-kubectl -n $(NS) describe pod $(POD)
 	-kubectl -n $(NS) logs $(POD) --previous 2>/dev/null | grep -m1 -A150 -E ' ERROR |Traceback' \
 	  || kubectl -n $(NS) logs $(POD) --tail=300
+	@# A dead vLLM worker: the 6Gi limit (kernel OOM kill) or a full /dev/shm (memory-backed, survives restarts)?
+	-kubectl -n $(NS) exec $(POD) -- sh -c 'cat /sys/fs/cgroup/memory.events; df -h /dev/shm; ls -la /dev/shm'
+	-sudo -n dmesg -T 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -20
 
 bench: ## load test through the gateway; results in bench/results/$(RUN)
 	bench/run.sh bench/results/$(RUN)
