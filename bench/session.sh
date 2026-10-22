@@ -43,6 +43,7 @@ gpu_count_is() { [ "$(kubectl get node "$node" -o jsonpath='{.status.allocatable
 gpus() { wait_for 20 "$1 GPUs on $node" gpu_count_is "$1"; }   # gpus <n>: n advertised nvidia.com/gpu
 
 secret() { kubectl -n llm get secret "$1" -o jsonpath='{.data.key}' | base64 -d; }
+embed_busy() { kubectl -n llm logs deploy/vllm-embed --since=1m | grep -q 'POST /v1/embeddings'; }
 prometheus() {  # port-forward Prometheus to localhost:19090 for prom
   kubectl -n monitoring port-forward svc/prometheus-operated 19090:9090 >/dev/null 2>&1 &
   sleep 3
@@ -138,6 +139,7 @@ for step in $steps; do
     kubectl -n llm scale deploy/vllm-embed --replicas=1   # only after chat holds its memory
     kubectl -n llm rollout status deploy/vllm-embed --timeout=15m
     kubectl -n llm apply -f bench/embed-load.yaml
+    wait_for 10 "embedding traffic" embed_busy   # the first session's neighbour may never have been busy
     bench/run.sh "$out/shared-busy" $BENCH $DIRECT CONCURRENCY=16
     kubectl -n llm delete -f bench/embed-load.yaml
     # the embed Backend's own throughput is the proof that the neighbour was actually busy

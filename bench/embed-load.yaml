@@ -14,19 +14,14 @@ spec:
       containers:
         - name: load
           image: vllm/vllm-openai-cpu:v0.31.0
+          # Batches of 20k: one batch of 1M prompts filled the 2Gi limit before sending a request.
           command:
-            - vllm
-            - bench
-            - serve
-            - --backend=openai-embeddings
-            - --endpoint=/v1/embeddings
-            - --base-url=http://vllm-embed:8000
-            - --model=Qwen/Qwen3-Embedding-0.6B
-            - --dataset-name=random
-            - --random-input-len=256
-            - --num-prompts=1000000
-            - --max-concurrency=16
-            - --disable-tqdm
+            - sh
+            - -c
+            - >-
+              while :; do vllm bench serve --backend=openai-embeddings --endpoint=/v1/embeddings
+              --base-url=http://vllm-embed:8000 --model=Qwen/Qwen3-Embedding-0.6B --dataset-name=random
+              --random-input-len=256 --num-prompts=20000 --max-concurrency=16 --disable-tqdm; done
           resources:
             requests: {cpu: 500m, memory: 512Mi}
             limits: {memory: 2Gi}
