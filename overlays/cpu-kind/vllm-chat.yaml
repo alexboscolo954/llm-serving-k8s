@@ -18,6 +18,10 @@ spec:
         - name: vllm
           # Multi-arch tag: amd64 and arm64 (Docker Desktop on Apple silicon).
           image: vllm/vllm-openai-cpu:v0.31.0
+          # Triton-CPU builds kernels for LLVM's host CPU name, so on a runner VM that hides AVX-512
+          # (EPYC 9V74 = "znver4") every kernel dies with SIGILL. Without it vLLM uses C++ fallbacks.
+          # `rm -r`, not `-rf`: if the path moves in a newer image, startup fails instead of silently keeping Triton.
+          command: [sh, -c, 'rm -r /opt/venv/lib/python3.12/site-packages/triton/backends/cpu && exec vllm serve "$@"', vllm]
           args:
             - Qwen/Qwen2.5-0.5B-Instruct
             - --port=8000
@@ -32,8 +36,7 @@ spec:
             - {name: VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS, value: "900"}
             # A worker killed by a signal (SIGSEGV, SIGILL...) prints the signal and its stack
             - {name: PYTHONFAULTHANDLER, value: "1"}
-            # The V2 model runner's Triton-CPU kernels hit SIGILL (AVX-512 code) on runners whose CPU hides AVX-512
-            - {name: VLLM_USE_V2_MODEL_RUNNER, value: "0"}
+            - {name: VLLM_USE_V2_MODEL_RUNNER, value: "0"}   # the V2 model runner is built from Triton kernels
           ports:
             - {name: http, containerPort: 8000}
           securityContext:

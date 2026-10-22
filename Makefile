@@ -32,6 +32,7 @@ up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kubectl -n $(NS) rollout status deploy/chat-epp --timeout=5m
 	kubectl -n $(NS) wait --for=condition=Ready cluster/litellm-db --timeout=10m
 	kubectl -n $(NS) rollout status sts/vllm-chat --timeout=15m
+	kubectl -n $(NS) logs vllm-chat-0 | grep "Triton is installed, but doesn't include CPU backend"   # Triton-CPU is off (vllm-chat.yaml)
 	kubectl -n $(NS) rollout status deploy/vllm-embed --timeout=10m
 	kubectl -n $(NS) rollout status deploy/litellm --timeout=5m
 	kubectl -n $(NS) wait --for=condition=complete job/litellm-metrics-key --timeout=5m
