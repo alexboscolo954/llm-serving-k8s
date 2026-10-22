@@ -1,14 +1,19 @@
-# helm install opencost opencost/opencost --version 2.5.32 \
-#   -n opencost --create-namespace -f platform/opencost-values.yaml
+# helm install opencost opencost/opencost --version 2.5.33 \
+#   -n opencost --create-namespace -f platform/opencost-values.yaml   (`make observe` does this)
 # On-prem: no cloud billing API, so cost comes from a custom price sheet.
 # GPU usage per pod comes from the DCGM exporter scraped by Prometheus.
 opencost:
   prometheus:
     internal:
       enabled: true
-      serviceName: prometheus-operated   # adjust to your Prometheus service
+      serviceName: prometheus-operated   # kube-prometheus-stack, platform/kube-prometheus-stack-values.yaml
       namespaceName: monitoring
       port: 9090
+  # Cost is computed from OpenCost's own metrics (node prices, allocations), so Prometheus scrapes them.
+  metrics:
+    serviceMonitor:
+      enabled: true
+  # Hourly, USD: CPU per core, RAM per GiB, GPU per card, storage per GiB.
   customPricing:
     enabled: true
     provider: custom
@@ -18,5 +23,7 @@ opencost:
       RAM: 0.004
       GPU: 2.50
       storage: 0.0001
+  mcp:
+    enabled: false   # chart default on; nothing here uses it
   ui:
     enabled: true

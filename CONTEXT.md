@@ -40,6 +40,10 @@ _Avoid_: infra, addons
 How a GPU node advertises its cards: **dedicated** (one Backend per card) or **shared** (one card time-sliced between several Backends).
 _Avoid_: sharing mode, node type
 
+**Price sheet**:
+The hourly prices (per CPU core, GiB of memory, GPU and GiB of storage) a cost tool charges each Backend for what it holds. On-prem there is no cloud bill, so they stand in for amortized hardware cost.
+_Avoid_: pricing, rates, custom pricing (that's OpenCost's name for it)
+
 **Overlay**:
 A deployment target (CPU-kind, GPU) built on the shared base.
 _Avoid_: environment, flavor
