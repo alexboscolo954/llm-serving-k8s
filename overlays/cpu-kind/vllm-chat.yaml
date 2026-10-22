@@ -30,6 +30,8 @@ spec:
             # Two replicas of 4 threads each on 4 vCPUs stalled a step past the 300 s limit and killed the engine
             - {name: OMP_NUM_THREADS, value: "2"}
             - {name: VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS, value: "900"}
+            # A worker killed by a signal (SIGSEGV, SIGILL...) prints the signal and its stack (startup crash)
+            - {name: PYTHONFAULTHANDLER, value: "1"}
           ports:
             - {name: http, containerPort: 8000}
           securityContext:

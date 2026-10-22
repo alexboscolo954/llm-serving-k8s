@@ -34,13 +34,15 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install pytest==9.0.2
       - uses: azure/setup-helm@v5
-      - name: Runner size
-        run: nproc && free -g
+      - name: Runner size and CPU   # the startup crash may follow the runner's CPU model
+        run: nproc && free -g && lscpu | grep -E 'Model name|Flags'
       - uses: helm/kind-action@v1
         with:
           version: v0.33.0   # kindnet enforces NetworkPolicy; same version as local runs
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
+      - name: Follow chat-0's log   # every container's, `--previous` keeps only the last
+        run: nohup make follow-chat >/dev/null 2>&1 &
       - run: make up
       - run: make test
       - run: make bench RUN=ci
@@ -58,6 +60,12 @@ jobs:
           kubectl -n llm logs deploy/chat-epp --tail=100 || true
           kubectl -n llm logs deploy/inference-gateway-istio --tail=50 || true
           kubectl -n llm logs job/litellm-metrics-key --tail=20 || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: chat-0-log-${{ github.job }}
+          path: chat-0.log
+          if-no-files-found: ignore
 
   e2e-observability:
     # Same stack plus kube-prometheus-stack and OpenCost: scraping, dashboard queries, alert rules and cost on a live cluster.
@@ -69,11 +77,15 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install pytest==9.0.2
       - uses: azure/setup-helm@v5
+      - name: Runner size and CPU   # the startup crash may follow the runner's CPU model
+        run: nproc && free -g && lscpu | grep -E 'Model name|Flags'
       - uses: helm/kind-action@v1
         with:
           version: v0.33.0   # kindnet enforces NetworkPolicy; same version as local runs
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
+      - name: Follow chat-0's log   # every container's, `--previous` keeps only the last
+        run: nohup make follow-chat >/dev/null 2>&1 &
       - run: make up
       - run: make observe
       - run: make cost
@@ -86,6 +98,12 @@ jobs:
           kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100 || true
           make logs-chat
           kubectl -n llm logs deploy/litellm --tail=100
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: chat-0-log-${{ github.job }}
+          path: chat-0.log
+          if-no-files-found: ignore
 
   e2e-autoscaling:
     # Same stack plus Prometheus and KEDA: under load the chat Backend scales 1 -> 2.
@@ -97,11 +115,15 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install pytest==9.0.2
       - uses: azure/setup-helm@v5
+      - name: Runner size and CPU   # the startup crash may follow the runner's CPU model
+        run: nproc && free -g && lscpu | grep -E 'Model name|Flags'
       - uses: helm/kind-action@v1
         with:
           version: v0.33.0   # kindnet enforces NetworkPolicy; same version as local runs
           cluster_name: llm-serving
           config: overlays/cpu-kind/kind-config.yaml
+      - name: Follow chat-0's log   # every container's, `--previous` keeps only the last
+        run: nohup make follow-chat >/dev/null 2>&1 &
       - run: make up
       - run: make observe
       - run: make autoscale
@@ -120,3 +142,40 @@ jobs:
           free -m
           kubectl describe node | sed -n '/Allocated resources/,/Events/p'
           kubectl -n keda logs deploy/keda-operator --tail=100
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: chat-0-log-${{ github.job }}
+          path: chat-0.log
+          if-no-files-found: ignore
+
+  crash-hunt:
+    # TEMPORARY, removed before merge: 10 fresh `make up`s to catch the CPU chat startup crash on several hosts.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: {n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - name: Runner size and CPU   # the startup crash may follow the runner's CPU model
+        run: nproc && free -g && lscpu | grep -E 'Model name|Flags'
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.33.0
+          cluster_name: llm-serving
+          config: overlays/cpu-kind/kind-config.yaml
+      - name: Follow chat-0's log   # every container's, `--previous` keeps only the last
+        run: nohup make follow-chat >/dev/null 2>&1 &
+      - run: make up
+      - if: failure()
+        run: |
+          kubectl -n llm get pods -o wide
+          make logs-chat
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: chat-0-log-${{ github.job }}-${{ matrix.n }}
+          path: chat-0.log
+          if-no-files-found: ignore
