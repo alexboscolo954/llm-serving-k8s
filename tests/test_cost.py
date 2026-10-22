@@ -17,7 +17,7 @@ def price_sheet():
     out = subprocess.run(["kubectl", "-n", "opencost", "get", "configmap", "custom-pricing-model",
                           "-o", "json"], check=True, capture_output=True, text=True).stdout
     # the chart renders the price sheet's keys straight into the ConfigMap's data
-    return {k: float(v) for k, v in json.loads(out)["data"].items() if k in ("CPU", "RAM")}
+    return {k: float(v) for k, v in json.loads(out)["data"].items() if k in ("CPU", "RAM", "GPU")}
 
 
 def backends():
@@ -44,15 +44,15 @@ def test_node_prices_come_from_the_price_sheet():
     eventually(check)
 
 
-def test_each_backend_costs_its_cpu_and_memory_hours_at_sheet_prices():
+def test_each_backend_costs_its_hours_at_sheet_prices():
     sheet = price_sheet()
     def check():
         pods = backends()
-        assert any(p.startswith("vllm-chat-") for p in pods) and any(p.startswith("vllm-embed-") for p in pods), pods.keys()
+        assert any(p.startswith("vllm-chat-") for p in pods), pods.keys()   # embed is scaled to 0 in some GPU steps
         for pod, a in pods.items():
             assert a["cpuCoreHours"] > 0 and a["ramByteHours"] > 0, (pod, a)
             assert close(a["cpuCost"], a["cpuCoreHours"] * sheet["CPU"]), (pod, a["cpuCost"], a["cpuCoreHours"])
             assert close(a["ramCost"], a["ramByteHours"] / GIB * sheet["RAM"]), (pod, a["ramCost"], a["ramByteHours"])
-            assert a["gpuCost"] == 0, (pod, a["gpuCost"])   # no GPUs on kind
+            assert close(a["gpuCost"], a["gpuHours"] * sheet["GPU"]), (pod, a["gpuCost"], a["gpuHours"])   # 0 on kind
         return {p: round(a["totalCost"], 5) for p, a in pods.items()}
     print("\ncost per Backend, last 10 minutes (USD):", eventually(check))
