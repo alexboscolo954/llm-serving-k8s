@@ -18,6 +18,8 @@ spec:
       containers:
         - name: vllm
           image: vllm/vllm-openai-cpu:v0.31.0
+          # No Triton-CPU, V1 model runner: same SIGILL fix as vllm-chat.yaml
+          command: [sh, -c, 'rm -r /opt/venv/lib/python3.12/site-packages/triton/backends/cpu && exec vllm serve "$@"', vllm]
           args:
             - BAAI/bge-small-en-v1.5
             - --port=8000
@@ -26,6 +28,7 @@ spec:
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
             - {name: VLLM_CPU_OMP_THREADS_BIND, value: nobind}   # "auto" pins to 1 core on a 4-vCPU SMT runner
+            - {name: VLLM_USE_V2_MODEL_RUNNER, value: "0"}
           ports:
             - {name: http, containerPort: 8000}
           securityContext:
