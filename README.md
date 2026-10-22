@@ -129,7 +129,7 @@ Needs a GCP project with L4 quota, `gcloud` and `terraform`. The VM deletes itse
 ```bash
 export TF_VAR_project=<gcp-project-id> TF_VAR_billing_account=<billing-account-id>
 make bench-up ZONE=us-west1-a SPOT=false   # g2-standard-12 + RKE2, kubeconfig in ~/k8s_clusters/llm-bench-l4.yaml
-make bench-gpu                             # platform, fp8, gateway, shared, bf16; results in bench/results/<date>-l4
+make bench-gpu                             # platform, e2e, overhead, shared; results in bench/results/<date>-l4
 make bench-down                            # destroy, then check nothing is left running
 ```
 
@@ -172,7 +172,7 @@ Everything is plain Kustomize and upstream Helm charts with values files. There 
 
 ## Validation
 
-`make validate` needs no cluster. It renders both overlays, the observability manifests and the six Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`.
+`make validate` needs no cluster. It renders both overlays, the observability manifests and the six Helm charts, checks them with `kubeconform` and the kyverno CLI, unit-tests the alert rules with `promtool` and the results generator with `pytest`, and runs `shellcheck` on the session scripts.
 Operator CRDs such as `ClusterPolicy` are skipped (`-ignore-missing-schemas`), and so is `InferencePool`, which the public schema catalog does not have yet.
 CI runs `validate` and three CPU end-to-end jobs (Gateway, observability, autoscaling), each on its own kind cluster, on every pull request and on `main`.
 

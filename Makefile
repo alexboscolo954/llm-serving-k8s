@@ -151,3 +151,4 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template istiod istio/istiod --version $(ISTIO) -n istio-system -f platform/istiod-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
+	shellcheck bench/*.sh bench/infra/*.sh   # the GPU session script only runs on rented hardware
