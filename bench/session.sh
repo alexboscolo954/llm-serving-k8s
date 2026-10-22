@@ -2,7 +2,7 @@
 # shellcheck disable=SC2086 # $BENCH and $DIRECT are lists of ENV=value words, split on purpose
 # GPU Benchmark session on the single-L4 RKE2 VM from bench/infra.
 #   KUBECONFIG=~/k8s_clusters/llm-bench-l4.yaml bench/session.sh <out-dir> [step ...]
-# Steps: platform e2e overhead shared (default, in that order). The first
+# Steps: platform e2e overhead shared (default, in that order); cost and cost-shared by name. The first
 # session's fp8, gateway, bf16 and the opt-in bf16-64 still run by name; BF16 at
 # concurrency 64 did not finish in an hour on one L4.
 # Results land on the laptop after every step, so a spot preemption only
@@ -51,6 +51,16 @@ prometheus() {  # port-forward Prometheus to localhost:19090 for prom
 prom() {  # prom <out-file> <query>: save a Prometheus instant query
   curl -sfG http://localhost:19090/api/v1/query --data-urlencode "query=$2" > "$1"
 }
+cost() {  # cost <name>: CI's cost tests on this cluster, then save the last 10 minutes' cost per pod
+  mkdir -p "$out"
+  kubectl -n opencost port-forward svc/opencost 19003:9003 >/dev/null 2>&1 & pf=$!
+  prometheus; sleep 3
+  OPENCOST_URL=http://localhost:19003 PROM_URL=http://localhost:19090 \
+    python3 -m pytest -v -s tests/test_cost.py > "$out/$1.txt" 2>&1 || echo "cost tests failed"
+  curl -sfG http://localhost:19003/allocation --data-urlencode window=10m --data-urlencode aggregate=pod \
+    --data-urlencode 'filter=namespace:"llm"' > "$out/$1.json"
+  kill $pf; tail -5 "$out/$1.txt"
+}
 
 for step in $steps; do
   echo "=== $step"
@@ -60,6 +70,7 @@ for step in $steps; do
     kubectl annotate storageclass local-path storageclass.kubernetes.io/is-default-class=true --overwrite
     kubectl create ns llm --dry-run=client -o yaml | kubectl apply -f -
     make observe   # Prometheus first: the GPU Operator's DCGM ServiceMonitor needs its CRDs
+    make cost
     helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null; helm repo update nvidia >/dev/null
     kubectl create ns gpu-operator --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f platform/time-slicing-config.yaml
@@ -144,6 +155,23 @@ for step in $steps; do
     kubectl -n llm delete -f bench/embed-load.yaml
     # the embed Backend's own throughput is the proof that the neighbour was actually busy
     kubectl -n llm logs deploy/vllm-embed | grep 'Engine 000' > "$out/shared-busy/vllm-embed-stats.log"
+    ;;
+  cost)  # chat holds the whole GPU (dedicated profile) for 10 minutes
+    kubectl -n llm scale deploy/vllm-embed --replicas=0   # its shared profile only exists in cost-shared
+    kubectl label node "$node" nvidia.com/device-plugin.config=dedicated --overwrite
+    gpus 1
+    chat '"--quantization=fp8","--gpu-memory-utilization=0.90"' dedicated
+    sleep 600
+    cost cost-dedicated
+    ;;
+  cost-shared)  # chat and embed each hold one time-sliced replica of the GPU for 10 minutes
+    kubectl label node "$node" nvidia.com/device-plugin.config=shared --overwrite
+    gpus 4
+    chat '"--quantization=fp8","--gpu-memory-utilization=0.70"' shared
+    kubectl -n llm scale deploy/vllm-embed --replicas=1
+    kubectl -n llm rollout status deploy/vllm-embed --timeout=15m
+    sleep 600
+    cost cost-shared
     ;;
   *) echo "unknown step: $step"; exit 1 ;;
   esac

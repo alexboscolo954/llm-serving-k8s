@@ -22,7 +22,7 @@ VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up platform observe autoscale smoke test test-observability test-autoscaling logs-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
+.PHONY: up platform observe cost autoscale smoke test test-observability test-autoscaling logs-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
 
 up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
@@ -52,6 +52,11 @@ observe: ## Prometheus + Grafana, then scrape the Backends and the Gateway (afte
 	  -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml --wait --timeout 10m
 	kubectl apply -k observability
 
+cost: ## OpenCost on the price sheet in platform/opencost-values.yaml (after `make observe`)
+	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
+	helm upgrade --install opencost opencost/opencost --version 2.5.33 \
+	  -n opencost --create-namespace -f platform/opencost-values.yaml --wait --timeout 10m
+
 autoscale: ## KEDA, then scale the chat Backend on its queue (after `make observe`)
 	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
 	helm upgrade --install keda kedacore/keda --version 2.21.0 -n keda --create-namespace --wait --timeout 10m
@@ -67,13 +72,14 @@ smoke: ## chat completion through the LiteLLM gateway
 test: ## e2e tests against the running gateway: routing, Tenants, NetworkPolicies
 	@$(GATEWAY) $(PYTEST) -v tests/test_gateway.py tests/test_tenancy.py
 
-test-observability: ## e2e: targets up, every dashboard query returns data, alert rules loaded
+test-observability: ## e2e: targets up, every dashboard query returns data, alert rules loaded, cost at sheet prices
 	@kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & a=$$!; \
 	kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090 >/dev/null & b=$$!; \
 	kubectl -n monitoring port-forward svc/$(KPS)-grafana 3000:80 >/dev/null & c=$$!; \
-	trap "kill $$a $$b $$c" EXIT; sleep 3; \
+	kubectl -n opencost port-forward svc/opencost 9003:9003 >/dev/null & d=$$!; \
+	trap "kill $$a $$b $$c $$d" EXIT; sleep 3; \
 	GRAFANA_PASSWORD=$$(kubectl -n monitoring get secret $(KPS)-grafana -o jsonpath='{.data.admin-password}' | base64 -d) \
-	  $(PYTEST) -v tests/test_observability.py
+	  $(PYTEST) -v -s tests/test_observability.py tests/test_cost.py
 
 test-autoscaling: ## e2e: under load KEDA adds a chat replica with its own weights cache, and the Gateway uses it
 	kubectl -n $(NS) scale deploy/vllm-embed --replicas=0   # unused here; two chat replicas need its memory on a 16 GB node
@@ -141,7 +147,7 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	helm repo update nvidia opencost prometheus-community kedacore cnpg istio >/dev/null
 	helm template gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
-	helm template opencost opencost/opencost --version 2.5.32 -n opencost -f platform/opencost-values.yaml \
+	helm template opencost opencost/opencost --version 2.5.33 -n opencost -f platform/opencost-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template $(KPS) prometheus-community/kube-prometheus-stack --version 92.10.1 -n monitoring -f platform/kube-prometheus-stack-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -

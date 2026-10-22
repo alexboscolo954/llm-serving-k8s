@@ -60,7 +60,7 @@ jobs:
           kubectl -n llm logs job/litellm-metrics-key --tail=20 || true
 
   e2e-observability:
-    # Same stack plus kube-prometheus-stack: scraping, dashboard queries and alert rules on a live cluster.
+    # Same stack plus kube-prometheus-stack and OpenCost: scraping, dashboard queries, alert rules and cost on a live cluster.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -76,11 +76,13 @@ jobs:
           config: overlays/cpu-kind/kind-config.yaml
       - run: make up
       - run: make observe
+      - run: make cost
       - run: make test-observability
       - if: failure()
         run: |
           kubectl get pods -A -o wide
           kubectl -n monitoring describe pods || true
+          kubectl -n opencost logs deploy/opencost --tail=100 || true
           kubectl -n monitoring logs statefulset/prometheus-kube-prometheus-stack-prometheus --tail=100 || true
           make logs-chat
           kubectl -n llm logs deploy/litellm --tail=100

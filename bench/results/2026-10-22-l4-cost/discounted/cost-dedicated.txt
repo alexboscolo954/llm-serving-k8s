@@ -1,0 +1,48 @@
+[1m============================= test session starts ==============================[0m
+platform darwin -- Python 3.12.4, pytest-9.0.2, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/alex.boscolo/llm-serving-k8s
+plugins: anyio-4.14.0
+[1mcollecting ... [0mcollected 2 items
+
+tests/test_cost.py::test_node_prices_come_from_the_price_sheet [32mPASSED[0m
+tests/test_cost.py::test_each_backend_costs_its_hours_at_sheet_prices [31mFAILED[0m
+
+=================================== FAILURES ===================================
+[31m[1m______________ test_each_backend_costs_its_hours_at_sheet_prices _______________[0m
+
+    [0m[94mdef[39;49;00m [92mtest_each_backend_costs_its_hours_at_sheet_prices[39;49;00m():[90m[39;49;00m
+        sheet = price_sheet()[90m[39;49;00m
+        [94mdef[39;49;00m [92mcheck[39;49;00m():[90m[39;49;00m
+            pods = backends()[90m[39;49;00m
+            [94massert[39;49;00m [96many[39;49;00m(p.startswith([33m"[39;49;00m[33mvllm-chat-[39;49;00m[33m"[39;49;00m) [94mfor[39;49;00m p [95min[39;49;00m pods), pods.keys()   [90m# embed is scaled to 0 in some GPU steps[39;49;00m[90m[39;49;00m
+            [94mfor[39;49;00m pod, a [95min[39;49;00m pods.items():[90m[39;49;00m
+                [94massert[39;49;00m a[[33m"[39;49;00m[33mcpuCoreHours[39;49;00m[33m"[39;49;00m] > [94m0[39;49;00m [95mand[39;49;00m a[[33m"[39;49;00m[33mramByteHours[39;49;00m[33m"[39;49;00m] > [94m0[39;49;00m, (pod, a)[90m[39;49;00m
+                [94massert[39;49;00m close(a[[33m"[39;49;00m[33mcpuCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mcpuCoreHours[39;49;00m[33m"[39;49;00m] * sheet[[33m"[39;49;00m[33mCPU[39;49;00m[33m"[39;49;00m]), (pod, a[[33m"[39;49;00m[33mcpuCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mcpuCoreHours[39;49;00m[33m"[39;49;00m])[90m[39;49;00m
+                [94massert[39;49;00m close(a[[33m"[39;49;00m[33mramCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mramByteHours[39;49;00m[33m"[39;49;00m] / GIB * sheet[[33m"[39;49;00m[33mRAM[39;49;00m[33m"[39;49;00m]), (pod, a[[33m"[39;49;00m[33mramCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mramByteHours[39;49;00m[33m"[39;49;00m])[90m[39;49;00m
+                [94massert[39;49;00m close(a[[33m"[39;49;00m[33mgpuCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mgpuHours[39;49;00m[33m"[39;49;00m] * sheet[[33m"[39;49;00m[33mGPU[39;49;00m[33m"[39;49;00m]), (pod, a[[33m"[39;49;00m[33mgpuCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mgpuHours[39;49;00m[33m"[39;49;00m])   [90m# 0 on kind[39;49;00m[90m[39;49;00m
+            [94mreturn[39;49;00m {p: [96mround[39;49;00m(a[[33m"[39;49;00m[33mtotalCost[39;49;00m[33m"[39;49;00m], [94m5[39;49;00m) [94mfor[39;49;00m p, a [95min[39;49;00m pods.items()}[90m[39;49;00m
+>       [96mprint[39;49;00m([33m"[39;49;00m[33m\n[39;49;00m[33mcost per Backend, last 10 minutes (USD):[39;49;00m[33m"[39;49;00m, eventually(check))[90m[39;49;00m
+                                                            ^^^^^^^^^^^^^^^^^[90m[39;49;00m
+
+[1m[31mtests/test_cost.py[0m:58: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+[1m[31mtests/test_observability.py[0m:65: in eventually
+    [0m[94mreturn[39;49;00m check()[90m[39;49;00m
+           ^^^^^^^[90m[39;49;00m
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    [0m[94mdef[39;49;00m [92mcheck[39;49;00m():[90m[39;49;00m
+        pods = backends()[90m[39;49;00m
+        [94massert[39;49;00m [96many[39;49;00m(p.startswith([33m"[39;49;00m[33mvllm-chat-[39;49;00m[33m"[39;49;00m) [94mfor[39;49;00m p [95min[39;49;00m pods), pods.keys()   [90m# embed is scaled to 0 in some GPU steps[39;49;00m[90m[39;49;00m
+        [94mfor[39;49;00m pod, a [95min[39;49;00m pods.items():[90m[39;49;00m
+            [94massert[39;49;00m a[[33m"[39;49;00m[33mcpuCoreHours[39;49;00m[33m"[39;49;00m] > [94m0[39;49;00m [95mand[39;49;00m a[[33m"[39;49;00m[33mramByteHours[39;49;00m[33m"[39;49;00m] > [94m0[39;49;00m, (pod, a)[90m[39;49;00m
+>           [94massert[39;49;00m close(a[[33m"[39;49;00m[33mcpuCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mcpuCoreHours[39;49;00m[33m"[39;49;00m] * sheet[[33m"[39;49;00m[33mCPU[39;49;00m[33m"[39;49;00m]), (pod, a[[33m"[39;49;00m[33mcpuCost[39;49;00m[33m"[39;49;00m], a[[33m"[39;49;00m[33mcpuCoreHours[39;49;00m[33m"[39;49;00m])[90m[39;49;00m
+[1m[31mE           AssertionError: ('vllm-chat-0', 0.0112, 0.53333)[0m
+[1m[31mE           assert False[0m
+[1m[31mE            +  where False = close(0.0112, (0.53333 * 0.03))[0m
+
+[1m[31mtests/test_cost.py[0m:54: AssertionError
+[36m[1m=========================== short test summary info ============================[0m
+[31mFAILED[0m tests/test_cost.py::[1mtest_each_backend_costs_its_hours_at_sheet_prices[0m - AssertionError: ('vllm-chat-0', 0.0112, 0.53333)
+[31m=================== [31m[1m1 failed[0m, [32m1 passed[0m[31m in 308.49s (0:05:08)[0m[31m ====================[0m

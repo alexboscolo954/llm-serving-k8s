@@ -43,7 +43,8 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Autoscaling on GPUs | Render-only | [`overlays/gpu`](overlays/gpu): the same StatefulSet and ScaledObject render and pass the checks, but the Benchmark session had one GPU, so a second replica had nowhere to run |
 | Postgres, NetworkPolicies and the Endpoint Picker on the GPU cluster (RKE2, Canal CNI) | **Benchmarked** | [`bench/results/2026-10-22-l4/e2e.txt`](bench/results/2026-10-22-l4/e2e.txt): CI's Gateway and Tenant e2e tests pass on the GPU cluster, every chat request through the picker. One GPU, so one replica: no choice between replicas on GPUs yet |
 | GPU metrics (DCGM exporter) | **Benchmarked** | [`bench/results/2026-10-22-l4`](bench/results/2026-10-22-l4#cis-e2e-tests-on-rke2): Prometheus scrapes the GPU Operator's DCGM exporter; GPU utilisation per pod is in the results |
-| OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): points at the Prometheus above, but OpenCost itself has not been run |
+| Cost per Backend from an on-prem price sheet (OpenCost): each pod pays for the CPU and memory it holds | **CI-proven** | [`platform/opencost-values.yaml`](platform/opencost-values.yaml), [`tests/test_cost.py`](tests/test_cost.py): node prices in Prometheus are the sheet's, and each Backend's CPU and memory cost is its core-hours and GiB-hours at those prices (within 1%; OpenCost's defaults are 5–6% off) |
+| GPU cost per Backend: right on a dedicated card, 2× too high on a time-sliced one | **Benchmarked** | [`bench/results/2026-10-22-l4-cost`](bench/results/2026-10-22-l4-cost): chat holding a whole L4 is charged $2.50 an hour. On a time-sliced L4, chat and embed are each charged a whole card, $5.00 an hour for one GPU: OpenCost marked neither pod as sharing a card |
 
 - **CI-proven**: runs end-to-end on a kind cluster in CI, CPU only.
 - **Benchmarked**: measured in a recorded session on rented GPUs, with raw results and the exact setup committed.
@@ -80,7 +81,8 @@ make smoke   # one chat completion through the gateway
 make test    # e2e tests: routing, Tenants, NetworkPolicies
 make bench   # small load test; table in bench/results/<date>-cpu-kind/results.md
 make observe             # Prometheus + Grafana, scraping the Backends and the Gateway
-make test-observability  # targets up, every dashboard query returns data, alert rules loaded
+make cost                # OpenCost on the price sheet in platform/opencost-values.yaml
+make test-observability  # targets up, every dashboard query returns data, alert rules loaded, cost at sheet prices
 make autoscale           # KEDA, scaling the chat Backend on its queue (after make observe)
 make test-autoscaling    # load until KEDA adds a chat replica, then check the Gateway uses it
 make down
@@ -110,7 +112,7 @@ CI runs it on x86 Linux. The image is multi-arch, but on Apple silicon (Docker D
      -n gpu-operator -f platform/gpu-operator-values.yaml
    helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.10.1 \
      -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml
-   helm install opencost opencost/opencost --version 2.5.32 \
+   helm install opencost opencost/opencost --version 2.5.33 \
      -n opencost --create-namespace -f platform/opencost-values.yaml
    helm install keda kedacore/keda --version 2.21.0 -n keda --create-namespace
    make platform   # Gateway API and Inference Extension CRDs, CloudNativePG, Istio (gateway only)
@@ -140,7 +142,7 @@ Spot L4s were out of stock in most zones on the first attempt and reclaimed with
 - **FP8 for the chat model**: half the weight memory of BF16, and the freed memory becomes KV cache, so more concurrent sequences per GPU (measured: 3.3× the KV cache, +56–60% throughput on an L4). Needs Ada/Hopper or newer.
 - **Dedicated vs. shared GPUs, per node**: a node label picks a device-plugin profile. Big models get a whole card; small ones share a card through time-slicing.
 - **Time-slicing shares compute, not memory**: every pod on a shared card caps itself with `--gpu-memory-utilization`, and the caps must add up to less than 1.0. Compute is shared by taking turns, with no isolation: a busy neighbour cost the chat model 44% of its throughput. MIG gives hard isolation, but only on some GPUs and in fixed slice sizes.
-- **Cost visibility with OpenCost**: on-prem has no cloud bill, so a custom price sheet (amortized hardware cost) plus per-pod GPU usage from the DCGM exporter.
+- **Cost visibility with OpenCost**: on-prem has no cloud bill, so cost comes from a custom price sheet (amortized hardware cost per core, GiB and GPU hour), with OpenCost's cloud detection turned off: on a GCE VM it discounted the sheet's CPU and RAM by 30%. Tenants are Gateway teams, not namespaces, so OpenCost reports cost per Backend, not per Tenant. A time-sliced card is charged once per Backend on it, so shared GPUs need their cost divided by hand.
 - **Gateway in front of everything**: one auth point, retries and model aliases. vLLM backends stay ClusterIP-only, and a policy enforces it.
 - **Metrics from both layers**: vLLM exposes queue length, KV cache usage and time to first token per Backend; LiteLLM's open-source build adds Gateway request and failure counts once `callbacks: ["prometheus"]` is set. Its `/metrics/` endpoint wants a valid key, so the PodMonitor sends one that may only read metrics: the Prometheus Operator copies it into a Secret in `monitoring`, where the master key has no business.
 - **Alert on saturation, not load**: a full KV cache or a queue that keeps growing means the Backend is short of capacity. A busy Backend whose queue holds steady does not page anyone.
