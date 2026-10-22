@@ -13,6 +13,11 @@ opencost:
   metrics:
     serviceMonitor:
       enabled: true
+  # Without this OpenCost picks its cloud provider from the node, whatever customPricing.provider
+  # says: on a GCE VM it applied GCP's 30% sustained-use discount to the sheet's CPU and RAM prices.
+  exporter:
+    extraEnv:
+      USE_CUSTOM_PROVIDER: "true"
   # Hourly, USD: CPU per core, RAM per GiB, GPU per card, storage per GiB.
   customPricing:
     enabled: true
