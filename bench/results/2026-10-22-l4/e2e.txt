@@ -1,0 +1,17 @@
+[1m============================= test session starts ==============================[0m
+platform darwin -- Python 3.12.4, pytest-9.0.2, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/alex.boscolo/llm-serving-k8s
+plugins: anyio-4.14.0
+[1mcollecting ... [0mcollected 10 items / 2 deselected / 8 selected
+
+tests/test_gateway.py::test_chat_completion [32mPASSED[0m[32m                       [ 12%][0m
+tests/test_gateway.py::test_chat_streams_tokens [32mPASSED[0m[32m                   [ 25%][0m
+tests/test_gateway.py::test_wrong_key_is_rejected [32mPASSED[0m[32m                 [ 37%][0m
+tests/test_gateway.py::test_unknown_virtual_model_is_rejected [32mPASSED[0m[32m     [ 50%][0m
+tests/test_tenancy.py::test_tenant_over_its_limit_gets_429_and_another_tenant_does_not [32mPASSED[0m[32m [ 62%][0m
+tests/test_tenancy.py::test_metrics_key_reads_metrics_and_nothing_else [32mPASSED[0m[32m [ 75%][0m
+tests/test_tenancy.py::test_backends_refuse_pods_other_than_the_gateway[vllm-chat] [32mPASSED[0m[32m [ 87%][0m
+tests/test_tenancy.py::test_any_pod_reaches_the_gateway [32mPASSED[0m[32m           [100%][0m
+
+[32m======================= [32m[1m8 passed[0m, [33m2 deselected[0m[32m in 36.72s[0m[32m =======================[0m

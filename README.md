@@ -34,15 +34,15 @@ Swapping the model behind a name, or moving it to other hardware, is a gateway c
 | Load-test harness (`vllm bench serve` as a Job) | **CI-proven** | [`bench/`](bench): runs through the gateway on every PR; CPU numbers check the harness, they are not a benchmark |
 | Manifest rules: probes, memory limits, GPU requests, backends ClusterIP-only, pinned images | **CI-proven** | [`policies/`](policies): checked on every rendered overlay, and each rule is shown to fail on a broken manifest |
 | FP8 chat model on a dedicated GPU: +56–60% throughput over BF16, 3.3× the KV cache | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4): 1× L4, 3 repeats per point |
-| Embeddings on a time-sliced GPU (run next to the chat model in the session) | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#time-slicing-fp8-concurrency-16): chat throughput unchanged; neighbour load level not recorded |
-| Gateway overhead | **Benchmarked** | [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4#gateway-overhead-fp8-concurrency-16): same throughput and p95, about 400 ms higher mean TTFT. Measured before the Istio gateway hop was added |
+| Time-sliced GPU sharing: a busy neighbour costs the chat model 44% of its throughput | **Benchmarked** | [`bench/results/2026-10-22-l4`](bench/results/2026-10-22-l4#time-slicing-fp8-concurrency-16): chat alone on a shared L4 250 tok/s, next to an embedding Backend at about 75 requests/s 140 tok/s, ITL 51 → 113 ms. Corrects the first session's "unchanged", whose neighbour very likely never got a request |
+| Gateway overhead (LiteLLM, Istio gateway, Endpoint Picker) | **Benchmarked** | [`bench/results/2026-10-22-l4`](bench/results/2026-10-22-l4#gateway-overhead-with-the-istio-hop): about 520 ms more mean TTFT and 790 ms more p95 at 16 concurrent requests, throughput within 1% |
 | GPU Operator on RKE2, per-node GPU sharing profiles | **Benchmarked** | [`platform/`](platform), [`bench/infra`](bench/infra): installed and used in the session |
 | Metrics: Prometheus scrapes both Backends and the Gateway, and every Grafana dashboard query returns data from it | **CI-proven** | [`observability/`](observability), [`tests/test_observability.py`](tests/test_observability.py): checked under live traffic on the kind cluster |
 | Alerts: p95 time to first token, KV cache above 90%, a queue that only grows | **CI-proven** | [`observability/vllm-rules.test.yaml`](observability/vllm-rules.test.yaml): each alert fires on a bad series and stays silent on a good one (`promtool`), and Prometheus loads them in CI. Thresholds are starting points, not tuned on a GPU |
 | Autoscaling: the chat Backend goes from 1 to 2 replicas when requests queue (KEDA), and the new replica gets its own weights cache | **CI-proven** | [`autoscaling/`](autoscaling), [`tests/test_autoscaling.py`](tests/test_autoscaling.py): under load the queue builds, KEDA adds a replica, it gets its own PVC, becomes Ready and answers a request sent straight to it. The load stops before the routing check: two CPU replicas under full load stalled CI's 4-vCPU node |
 | Autoscaling on GPUs | Render-only | [`overlays/gpu`](overlays/gpu): the same StatefulSet and ScaledObject render and pass the checks, but the Benchmark session had one GPU, so a second replica had nowhere to run |
-| Postgres, NetworkPolicies and per-request routing on the GPU cluster (RKE2, Canal CNI) | Render-only | [`bench/session.sh`](bench/session.sh) installs them, but no Benchmark session has run since |
-| GPU metrics (DCGM exporter) | Render-only | [`platform/`](platform): the GPU Operator's ClusterPolicy asks for a DCGM ServiceMonitor (the operator creates it at runtime) and Prometheus accepts monitors from any release. DCGM metrics have never been scraped |
+| Postgres, NetworkPolicies and the Endpoint Picker on the GPU cluster (RKE2, Canal CNI) | **Benchmarked** | [`bench/results/2026-10-22-l4/e2e.txt`](bench/results/2026-10-22-l4/e2e.txt): CI's Gateway and Tenant e2e tests pass on the GPU cluster, every chat request through the picker. One GPU, so one replica: no choice between replicas on GPUs yet |
+| GPU metrics (DCGM exporter) | **Benchmarked** | [`bench/results/2026-10-22-l4`](bench/results/2026-10-22-l4#cis-e2e-tests-on-rke2): Prometheus scrapes the GPU Operator's DCGM exporter; GPU utilisation per pod is in the results |
 | OpenCost | Render-only | [`platform/opencost-values.yaml`](platform/opencost-values.yaml): points at the Prometheus above, but OpenCost itself has not been run |
 
 - **CI-proven**: runs end-to-end on a kind cluster in CI, CPU only.
@@ -68,7 +68,7 @@ Why the split: [ADR-0001](docs/adr/0001-every-claim-is-proven-or-labelled.md).
 Qwen3-8B, vLLM v0.31.0, 1024 input / 256 output tokens, median of 3 runs. At 64 concurrent requests BF16's KV cache holds only about 16 of them; the run did not finish within the VM's time cap.
 Full write-up, method, and the bug this session found in the GPU overlay: [`bench/results/2026-10-16-l4`](bench/results/2026-10-16-l4).
 
-**Next:** a GPU Benchmark session for what is Render-only on GPUs today (autoscaling, routing, Postgres, NetworkPolicies). Each lands as a release with its proof level.
+**Next:** autoscaling and the Endpoint Picker's choice between replicas on GPUs, which need a second GPU (GCP quota for it was denied).
 
 ## Quick start (CPU, about 10 minutes)
 
@@ -139,7 +139,7 @@ Spot L4s were out of stock in most zones on the first attempt and reclaimed with
 
 - **FP8 for the chat model**: half the weight memory of BF16, and the freed memory becomes KV cache, so more concurrent sequences per GPU (measured: 3.3× the KV cache, +56–60% throughput on an L4). Needs Ada/Hopper or newer.
 - **Dedicated vs. shared GPUs, per node**: a node label picks a device-plugin profile. Big models get a whole card; small ones share a card through time-slicing.
-- **Time-slicing shares compute, not memory**: every pod on a shared card caps itself with `--gpu-memory-utilization`, and the caps must add up to less than 1.0. MIG gives hard isolation, but only on some GPUs and in fixed slice sizes.
+- **Time-slicing shares compute, not memory**: every pod on a shared card caps itself with `--gpu-memory-utilization`, and the caps must add up to less than 1.0. Compute is shared by taking turns, with no isolation: a busy neighbour cost the chat model 44% of its throughput. MIG gives hard isolation, but only on some GPUs and in fixed slice sizes.
 - **Cost visibility with OpenCost**: on-prem has no cloud bill, so a custom price sheet (amortized hardware cost) plus per-pod GPU usage from the DCGM exporter.
 - **Gateway in front of everything**: one auth point, retries and model aliases. vLLM backends stay ClusterIP-only, and a policy enforces it.
 - **Metrics from both layers**: vLLM exposes queue length, KV cache usage and time to first token per Backend; LiteLLM's open-source build adds Gateway request and failure counts once `callbacks: ["prometheus"]` is set. Its `/metrics/` endpoint wants a valid key, so the PodMonitor sends one that may only read metrics: the Prometheus Operator copies it into a Secret in `monitoring`, where the master key has no business.
