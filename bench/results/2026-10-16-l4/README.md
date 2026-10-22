@@ -40,10 +40,10 @@ Through LiteLLM, output-token counts are recounted from text (±1 per request), 
 |---|---|---|---|
 | Dedicated GPU, memory cap 0.90 | 253.0 | 1,721 ms | 50.9 ms |
 | Shared (time-sliced) GPU, cap 0.70, alone | 252.9 | 1,724 ms | 50.9 ms |
-| Shared GPU, cap 0.70, embedding Backend under load | 252.8 | 1,734 ms | 50.9 ms |
+| Shared GPU, cap 0.70, embedding Backend with a load job that very likely never sent a request | 252.8 | 1,734 ms | 50.9 ms |
 
 - **Moving to a time-sliced card with a lower memory cap costs nothing** at this concurrency.
-- **No measurable interference** from the embedding neighbour. **Caveat:** the neighbour's load level was not recorded (its logs were lost when it was scaled down), and its load client had half a CPU. So this shows coexistence works; it does not show that time-slicing is free. `bench/session.sh` now saves the neighbour's throughput log.
+- **Corrected by the [2026-10-22 session](../2026-10-22-l4#time-slicing-fp8-concurrency-16):** the neighbour's load job very likely never sent a request (it built 1,000,000 prompts before sending any, and in that session the same job failed after about 12 minutes without a request), so the last row is an idle neighbour. Under real load the chat model lost 44% of its throughput.
 
 ## Found by running it
 

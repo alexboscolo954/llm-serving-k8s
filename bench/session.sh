@@ -1,20 +1,22 @@
 #!/bin/sh
+# shellcheck disable=SC2086 # $BENCH and $DIRECT are lists of ENV=value words, split on purpose
 # GPU Benchmark session on the single-L4 RKE2 VM from bench/infra.
 #   KUBECONFIG=~/k8s_clusters/llm-bench-l4.yaml bench/session.sh <out-dir> [step ...]
-# Steps: platform fp8 gateway shared bf16 (default, in that order), plus the
-# opt-in bf16-64: BF16 at concurrency 64 did not finish in an hour on one L4,
-# and a full session already takes ~4 h of the VM's 5 h cap.
+# Steps: platform e2e overhead shared (default, in that order). The first
+# session's fp8, gateway, bf16 and the opt-in bf16-64 still run by name; BF16 at
+# concurrency 64 did not finish in an hour on one L4.
 # Results land on the laptop after every step, so a spot preemption only
 # loses the step in progress.
 set -eu
 out=$1; shift
-steps=${*:-platform fp8 gateway shared bf16}
+steps=${*:-platform e2e overhead shared}
 vm=llm-bench-l4
+trap 'kill $(jobs -p) 2>/dev/null' EXIT   # port-forwards
 
 # Refuse to touch any cluster but the bench VM.
 [ -n "${KUBECONFIG:-}" ] || { echo "set KUBECONFIG explicitly"; exit 1; }
 node=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
-case $node in $vm|$vm.*) ;; *) echo "not the bench cluster: $node"; exit 1 ;; esac
+case $node in "$vm"|"$vm".*) ;; *) echo "not the bench cluster: $node"; exit 1 ;; esac
 
 # Fixed methodology: 1024 in / 256 out, 3 repeats, median reported.
 BENCH="TOKENIZER=Qwen/Qwen3-8B INPUT_LEN=1024 OUTPUT_LEN=256 REPEATS=3 PROMPTS_PER_CONCURRENCY=16 WARMUPS=4"
@@ -30,8 +32,24 @@ chat() {  # chat <extra args json> <gpu profile>: recreate the chat Backend, wai
   kubectl -n llm get sts vllm-chat -o jsonpath='{.spec.template.spec.containers[0].args}' > "$out/$step-chat-args.json"
 }
 
-gpus() {  # gpus <n>: wait until the node advertises n nvidia.com/gpu
-  until [ "$(kubectl get node $node -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')" = "$1" ]; do sleep 10; done
+wait_for() {  # wait_for <minutes> <what> <command...>: poll every 10 s, fail after <minutes>
+  left=$(($1 * 6)); what=$2; shift 2
+  until "$@"; do
+    left=$((left - 1)); [ "$left" -gt 0 ] || { echo "timed out waiting for $what"; exit 1; }
+    sleep 10
+  done
+}
+gpu_count_is() { [ "$(kubectl get node "$node" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')" = "$1" ]; }
+gpus() { wait_for 20 "$1 GPUs on $node" gpu_count_is "$1"; }   # gpus <n>: n advertised nvidia.com/gpu
+
+secret() { kubectl -n llm get secret "$1" -o jsonpath='{.data.key}' | base64 -d; }
+embed_busy() { kubectl -n llm logs deploy/vllm-embed --since=1m | grep -q 'POST /v1/embeddings'; }
+prometheus() {  # port-forward Prometheus to localhost:19090 for prom
+  kubectl -n monitoring port-forward svc/prometheus-operated 19090:9090 >/dev/null 2>&1 &
+  sleep 3
+}
+prom() {  # prom <out-file> <query>: save a Prometheus instant query
+  curl -sfG http://localhost:19090/api/v1/query --data-urlencode "query=$2" > "$1"
 }
 
 for step in $steps; do
@@ -40,17 +58,16 @@ for step in $steps; do
   platform)
     kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
     kubectl annotate storageclass local-path storageclass.kubernetes.io/is-default-class=true --overwrite
+    kubectl create ns llm --dry-run=client -o yaml | kubectl apply -f -
+    make observe   # Prometheus first: the GPU Operator's DCGM ServiceMonitor needs its CRDs
     helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null; helm repo update nvidia >/dev/null
     kubectl create ns gpu-operator --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f platform/time-slicing-config.yaml
-    kubectl label node $node nvidia.com/device-plugin.config=dedicated --overwrite
-    # no Prometheus until milestone B, so no ServiceMonitor CRD
+    kubectl label node "$node" nvidia.com/device-plugin.config=dedicated --overwrite
     helm upgrade --install gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator \
-      -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
-      --set dcgmExporter.serviceMonitor.enabled=false
+      -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml
     gpus 1
     make platform   # CNPG, Istio, Gateway API + Inference Extension CRDs
-    kubectl create ns llm --dry-run=client -o yaml | kubectl apply -f -
     for k in litellm-master-key litellm-metrics-key; do
       kubectl -n llm create secret generic $k --from-literal=key="sk-$(openssl rand -hex 16)" \
         --dry-run=client -o yaml | kubectl apply -f -
@@ -65,7 +82,7 @@ for step in $steps; do
       echo "# Setup, $(date -u +%FT%TZ)"
       echo; echo '```'
       gcloud compute instances list --filter=name=$vm --format='value(machineType.basename(),zone.basename(),scheduling.provisioningModel)'
-      kubectl get node $node -o jsonpath='{.status.nodeInfo.kubeletVersion} {.status.nodeInfo.containerRuntimeVersion} {.status.nodeInfo.osImage} {.status.nodeInfo.kernelVersion}{"\n"}'
+      kubectl get node "$node" -o jsonpath='{.status.nodeInfo.kubeletVersion} {.status.nodeInfo.containerRuntimeVersion} {.status.nodeInfo.osImage} {.status.nodeInfo.kernelVersion}{"\n"}'
       kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -- nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
       kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -- nvidia-smi | grep -o 'CUDA Version: [0-9.]*'
       echo "gpu-operator v26.7.1"
@@ -77,6 +94,21 @@ for step in $steps; do
     } > "$out/setup.md"
     cat "$out/setup.md"
     ;;
+  e2e)  # CI's e2e tests on this cluster: Gateway, keys in Postgres, Tenants, NetworkPolicies under Canal
+    kubectl -n llm port-forward svc/litellm 14000:4000 >/dev/null 2>&1 & pf=$!
+    sleep 3
+    mkdir -p "$out"
+    # The embed Backend is scaled to 0 here, so its tests are left out.
+    GATEWAY_URL=http://localhost:14000 GATEWAY_KEY=$(secret litellm-master-key) METRICS_KEY=$(secret litellm-metrics-key) \
+      python3 -m pytest -v tests/test_gateway.py tests/test_tenancy.py -k 'not embed' > "$out/e2e.raw" 2>&1 \
+      || echo "e2e tests failed"   # a result, not a reason to stop the session
+    # A failed assert prints its arguments, keys included, and results are committed.
+    sed -E 's/sk-[A-Za-z0-9_-]+/sk-REDACTED/g' "$out/e2e.raw" > "$out/e2e.txt"; rm "$out/e2e.raw"
+    kill $pf
+    tail -20 "$out/e2e.txt"
+    prometheus
+    prom "$out/dcgm-gpu-util.json" 'DCGM_FI_DEV_GPU_UTIL'   # the DCGM exporter is scraped
+    ;;
   fp8)
     chat '"--quantization=fp8","--gpu-memory-utilization=0.90"' dedicated
     bench/run.sh "$out/fp8" $BENCH $DIRECT CONCURRENCY="1 4 16 64"
@@ -84,9 +116,14 @@ for step in $steps; do
   gateway)  # same as fp8 at c=16, but through LiteLLM: compare TTFT and E2E only
     bench/run.sh "$out/gateway" $BENCH MODEL_NAME=chat CONCURRENCY=16
     ;;
+  overhead)  # gateway, back to back with its direct baseline: LiteLLM, the Istio gateway and the Endpoint Picker
+    chat '"--quantization=fp8","--gpu-memory-utilization=0.90"' dedicated
+    bench/run.sh "$out/overhead-direct" $BENCH $DIRECT CONCURRENCY=16
+    bench/run.sh "$out/overhead-gateway" $BENCH MODEL_NAME=chat CONCURRENCY=16
+    ;;
   bf16)
     kubectl -n llm scale deploy/vllm-embed --replicas=0   # frees its slice before going back to one whole GPU
-    kubectl label node $node nvidia.com/device-plugin.config=dedicated --overwrite
+    kubectl label node "$node" nvidia.com/device-plugin.config=dedicated --overwrite
     gpus 1
     chat '"--gpu-memory-utilization=0.90"' dedicated
     bench/run.sh "$out/bf16" $BENCH $DIRECT CONCURRENCY="1 4 16"
@@ -95,17 +132,19 @@ for step in $steps; do
     bench/run.sh "$out/bf16-64" $BENCH $DIRECT CONCURRENCY=64 REPEATS=1
     ;;
   shared)  # time-slicing cost: chat alone vs chat next to a busy embed Backend, same caps
-    kubectl label node $node nvidia.com/device-plugin.config=shared --overwrite
+    kubectl label node "$node" nvidia.com/device-plugin.config=shared --overwrite
     gpus 4
     chat '"--quantization=fp8","--gpu-memory-utilization=0.70"' shared
     bench/run.sh "$out/shared-alone" $BENCH $DIRECT CONCURRENCY=16
     kubectl -n llm scale deploy/vllm-embed --replicas=1   # only after chat holds its memory
     kubectl -n llm rollout status deploy/vllm-embed --timeout=15m
     kubectl -n llm apply -f bench/embed-load.yaml
+    wait_for 10 "embedding traffic" embed_busy   # the first session's neighbour may never have been busy
     bench/run.sh "$out/shared-busy" $BENCH $DIRECT CONCURRENCY=16
     kubectl -n llm delete -f bench/embed-load.yaml
     # the embed Backend's own throughput is the proof that the neighbour was actually busy
     kubectl -n llm logs deploy/vllm-embed | grep 'Engine 000' > "$out/shared-busy/vllm-embed-stats.log"
     ;;
+  *) echo "unknown step: $step"; exit 1 ;;
   esac
 done

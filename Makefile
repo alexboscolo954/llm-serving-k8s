@@ -96,7 +96,7 @@ bench: ## load test through the gateway; results in bench/results/$(RUN)
 
 bench-up: ## L4 VM with RKE2 (auto-deletes after max_hours), kubeconfig in $(BENCHKC)
 	$(TF) init -input=false >/dev/null
-	$(TF) apply -auto-approve -input=false -var ssh_cidr=$$(curl -s https://ifconfig.me)/32 -var zone=$(ZONE) -var region=$(shell echo $(ZONE) | sed 's/-[a-z]$$//') -var spot=$(SPOT)
+	$(TF) apply -auto-approve -input=false -var ssh_cidr=$$(curl -4 -s https://ifconfig.me)/32 -var zone=$(ZONE) -var region=$(shell echo $(ZONE) | sed 's/-[a-z]$$//') -var spot=$(SPOT)
 	until gcloud compute ssh $(VM) --quiet --command 'sudo test -e /etc/rancher/rke2/rke2.yaml' 2>/dev/null; do sleep 15; done
 	gcloud compute ssh $(VM) --quiet --command 'sudo cat /etc/rancher/rke2/rke2.yaml' | sed 's/127.0.0.1:6443/127.0.0.1:16443/' > $(BENCHKC)
 	$(MAKE) bench-tunnel
@@ -151,3 +151,4 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template istiod istio/istiod --version $(ISTIO) -n istio-system -f platform/istiod-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
+	shellcheck bench/*.sh bench/infra/*.sh   # the GPU session script only runs on rented hardware
