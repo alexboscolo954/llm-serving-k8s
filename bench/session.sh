@@ -176,6 +176,7 @@ for step in $steps; do
   autoscale)  # KEDA adds a second chat replica on the same time-sliced L4, and the Endpoint Picker routes to it.
     # Qwen3-8B doesn't fit twice on one card, so both replicas run Qwen3-4B, each capped at 4 sequences so
     # a 16-concurrent load queues, as in CI. Shows scale-up and routing on GPUs, not added capacity.
+    # Run it last: it leaves two Qwen3-4B replicas and KEDA behind.
     kubectl -n llm scale deploy/vllm-embed --replicas=0
     kubectl label node "$node" nvidia.com/device-plugin.config=shared --overwrite
     gpus 4
@@ -185,6 +186,9 @@ for step in $steps; do
       kubectl -n llm rollout restart deploy/litellm && kubectl -n llm rollout status deploy/litellm --timeout=5m
     }
     gateway_model Qwen/Qwen3-8B Qwen/Qwen3-4B
+    # Two replicas of the overlay's 32Gi request don't fit the VM's 48 GB: replica 1 would stay Pending
+    kubectl -n llm patch sts vllm-chat --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources",
+      "value":{"requests":{"cpu":"2","memory":"12Gi","nvidia.com/gpu":1},"limits":{"memory":"24Gi","nvidia.com/gpu":1}}}]'
     CHAT_ARGS='["Qwen/Qwen3-4B","--port=8000","--max-model-len=4096"'
     chat '"--quantization=fp8","--gpu-memory-utilization=0.45","--max-num-seqs=4"' shared
     make autoscale
@@ -198,15 +202,11 @@ for step in $steps; do
     kubectl -n llm delete -f bench/chat-load.yaml --ignore-not-found
     kubectl -n llm get pods,pvc,hpa -o wide > "$out/autoscale-pods.txt"
     kubectl -n llm describe hpa >> "$out/autoscale-pods.txt"
+    kubectl describe node "$node" | sed -n '/Allocated resources/,/Events/p' >> "$out/autoscale-pods.txt"
     for p in vllm-chat-0 vllm-chat-1; do   # created, scheduled, Ready: the second replica's cold start on a GPU
       kubectl -n llm get pod $p -o jsonpath='{.metadata.name} created={.metadata.creationTimestamp} {range .status.conditions[*]}{.type}={.lastTransitionTime} {end}{"\n"}'
     done > "$out/autoscale-timeline.txt"
     kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -- nvidia-smi > "$out/autoscale-nvidia-smi.txt"   # one card, two replicas
-    # Back to one Qwen3-8B replica on the whole card for any later step
-    kubectl delete -k autoscaling
-    kubectl -n llm scale sts vllm-chat --replicas=1
-    gateway_model Qwen/Qwen3-4B Qwen/Qwen3-8B
-    CHAT_ARGS='["Qwen/Qwen3-8B","--port=8000","--max-model-len=16384"'
     tail -20 "$out/autoscale.txt"; cat "$out/autoscale-timeline.txt"
     ;;
   *) echo "unknown step: $step"; exit 1 ;;
