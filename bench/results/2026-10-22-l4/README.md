@@ -22,8 +22,8 @@ Exact versions, digests and the model revision are in [`setup.md`](setup.md). Ea
 | Direct to vLLM | 250.2 | 1,047 ms | 764 ms | 1,827 ms | 16,751 ms |
 | LiteLLM → Istio gateway → Endpoint Picker → vLLM | 247.6 | 1,564 ms | 1,537 ms | 2,614 ms | 17,237 ms |
 
-The Gateway path adds about 520 ms to mean time to first token and about 790 ms to p95; throughput and end-to-end latency move by 1–3%.
-In the first session, LiteLLM alone (no Istio, no picker) added about 400 ms to the mean and nothing to p95. Across two sessions of 3 runs each, that puts the new hop at roughly 100 ms on the mean; this is one comparison, not a measured breakdown per hop.
+The Gateway path adds about 790 ms to p95 time to first token and about 520 ms to the mean; end-to-end p95 moves by 3%.
+In the first session, LiteLLM alone (no Istio, no picker) added nothing to p95 and about 400 ms to the mean. So the main new cost is in the tail: p95 TTFT goes from unchanged to +790 ms, while the mean moves by roughly 100 ms. That is a comparison across two sessions of 3 runs each, not a measured breakdown per hop.
 Through LiteLLM, output-token counts are recounted from text (±1 per request), so throughput through the Gateway is only indicative.
 
 ## Time-slicing (FP8, concurrency 16)
