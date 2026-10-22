@@ -99,8 +99,10 @@ for step in $steps; do
     mkdir -p "$out"
     # The embed Backend is scaled to 0 here, so its tests are left out.
     GATEWAY_URL=http://localhost:14000 GATEWAY_KEY=$(secret litellm-master-key) METRICS_KEY=$(secret litellm-metrics-key) \
-      python3 -m pytest -v tests/test_gateway.py tests/test_tenancy.py -k 'not embed' > "$out/e2e.txt" 2>&1 \
+      python3 -m pytest -v tests/test_gateway.py tests/test_tenancy.py -k 'not embed' > "$out/e2e.raw" 2>&1 \
       || echo "e2e tests failed"   # a result, not a reason to stop the session
+    # A failed assert prints its arguments, keys included, and results are committed.
+    sed -E 's/sk-[A-Za-z0-9_-]+/sk-REDACTED/g' "$out/e2e.raw" > "$out/e2e.txt"; rm "$out/e2e.raw"
     kill $pf
     tail -20 "$out/e2e.txt"
     prometheus
