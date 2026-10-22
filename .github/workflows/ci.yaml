@@ -149,20 +149,3 @@ jobs:
           path: chat-0.log
           if-no-files-found: ignore
 
-  crash-hunt:
-    # TEMPORARY, removed before merge: Triton-CPU on many hosts; on AVX2-only ones, V2 vs V1 model runner.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix: {n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]}
-    steps:
-      - uses: actions/checkout@v7
-      - name: CPU
-        run: lscpu | grep 'Model name'; grep -qw avx512f /proc/cpuinfo && echo "AVX512=yes" >> "$GITHUB_ENV" || echo "AVX2 only"
-      - name: Triton-CPU target and kernels on this host
-        run: |
-          docker run --rm -v "$PWD/bench/crash-hunt:/p" --entrypoint sh vllm/vllm-openai-cpu:v0.31.0 -c \
-            'python /p/triton_probe.py; for k in add exp; do python /p/triton_probe.py $k; echo "$k exit $?"; done'
-      - if: env.AVX512 != 'yes'
-        run: bench/crash-hunt/ab.sh
