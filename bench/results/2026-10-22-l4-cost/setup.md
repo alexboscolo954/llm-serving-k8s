@@ -10,5 +10,3 @@ docker.io/vllm/vllm-openai@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e9
 Qwen/Qwen3-8B b968826d9c46dd6066d109eabc6255188de91218
 ```
 
-Bench client: vllm bench serve, random dataset, 1024 input / 256 output tokens (ignore_eos),
-16 prompts per unit of concurrency, 4 warmup requests, 3 repeats with distinct seeds, median reported.

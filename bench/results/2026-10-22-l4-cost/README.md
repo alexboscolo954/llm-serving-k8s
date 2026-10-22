@@ -2,7 +2,7 @@
 
 OpenCost 1.121.3 (chart 2.5.33) on the price sheet in [`platform/opencost-values.yaml`](../../../platform/opencost-values.yaml): $0.03 per core-hour, $0.004 per GiB-hour, $2.50 per GPU-hour.
 Same cluster as the [Benchmark sessions](../2026-10-22-l4) (single-node RKE2 on a GCP `g2-standard-12`, us-central1-a), versions in [`setup.md`](setup.md).
-Each step holds the Backends idle for 10 minutes, then runs CI's cost tests ([`tests/test_cost.py`](../../../tests/test_cost.py)) against the cluster and saves OpenCost's allocation per pod for the last 10 minutes (`<step>.json`). OpenCost charges a pod for what it holds (its requests, or its usage if higher), so load does not change the GPU result.
+Each step holds the Backends idle for 10 minutes, then runs CI's cost tests ([`tests/test_cost.py`](../../../tests/test_cost.py)) against the cluster and saves OpenCost's allocation per pod for the last 10 minutes (`<step>.json`). OpenCost charges a pod for what it holds (its requests, or its usage if higher), so load does not change the GPU result. GPU utilisation per pod is not wired into OpenCost (`gpuUsageAverage` is empty in every allocation).
 
 ## Dedicated GPU: chat holds the whole card
 
@@ -17,7 +17,7 @@ Each step holds the Backends idle for 10 minutes, then runs CI's cost tests ([`t
 
 [`cost-shared.json`](cost-shared.json): chat and embed each hold one of the four time-sliced replicas of the same L4, and OpenCost charges each of them a full GPU at $2.50 an hour. One card costs $5.00 an hour with two Backends on it; by the same rule, four would be charged $10.00. The device plugin advertises time-sliced replicas as whole `nvidia.com/gpu` units, and OpenCost marked neither pod as shared. Whether another OpenCost setting splits them was not tested.
 The cost tests still pass here: each pod's GPU cost is its GPU-hours at the sheet's price. They check that the sheet is applied, not that a shared card is split.
-The 10-minute window held 5–6 minutes of data, about when OpenCost was restarted for the fix below; rates per hour are unaffected.
+Each 10-minute window held 5–7 minutes of data, also in the dedicated run without a restart; why is not established, and rates per hour are unaffected.
 
 ## Found by running it
 

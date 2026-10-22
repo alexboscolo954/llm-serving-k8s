@@ -10,6 +10,6 @@ devicePlugin:
     name: device-plugin-config
     default: dedicated   # nodes without the label get no sharing
 dcgmExporter:
-  enabled: true          # GPU metrics for Prometheus and OpenCost
+  enabled: true          # GPU metrics for Prometheus
   serviceMonitor:
     enabled: true        # needs the Prometheus Operator CRDs
