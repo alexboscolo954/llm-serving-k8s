@@ -19,7 +19,36 @@ spec:
   ingress:
     - ports: [{port: http}]
 ---
-# Backends: the Gateway, Prometheus, and pods that opt in with the direct-access label
+# Chat routing (chat-routing.yaml): LiteLLM calls the inference gateway, the gateway
+# asks the Endpoint Picker. Istio names the gateway's pods by this label.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inference-gateway
+spec:
+  podSelector:
+    matchLabels: {gateway.networking.k8s.io/gateway-name: inference-gateway}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: litellm}
+      ports: [{port: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chat-epp
+spec:
+  podSelector:
+    matchLabels: {app: chat-epp}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {gateway.networking.k8s.io/gateway-name: inference-gateway}
+      ports: [{port: 9002}]
+---
+# Backends: the Gateway (embed directly, chat through the inference gateway), the Endpoint
+# Picker reading each replica's /metrics, Prometheus, and pods that opt in with the direct-access label
 # (bench clients comparing engines without the Gateway). Any pod in llm can carry that
 # label, so it is only as strict as whoever may create pods here.
 apiVersion: networking.k8s.io/v1
@@ -34,6 +63,10 @@ spec:
     - from:
         - podSelector:
             matchLabels: {app: litellm}
+        - podSelector:
+            matchLabels: {gateway.networking.k8s.io/gateway-name: inference-gateway}
+        - podSelector:
+            matchLabels: {app: chat-epp}
         - podSelector:
             matchLabels: {llm-serving/direct-access: "true"}
         - namespaceSelector:

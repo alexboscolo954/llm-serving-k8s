@@ -27,6 +27,9 @@ spec:
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: "1"}   # GiB
             - {name: VLLM_CPU_OMP_THREADS_BIND, value: nobind}   # "auto" pins to 1 core on a 4-vCPU SMT runner
+            # Two replicas of 4 threads each on 4 vCPUs stalled a step past the 300 s limit and killed the engine
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS, value: "900"}
           ports:
             - {name: http, containerPort: 8000}
           securityContext:
@@ -38,6 +41,7 @@ spec:
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 10
+            timeoutSeconds: 5   # two replicas share 4 vCPUs
           resources:
             requests: {cpu: 500m, memory: 3Gi}   # no CPU limit: uses all cores
             limits: {memory: 6Gi}

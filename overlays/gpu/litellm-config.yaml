@@ -2,7 +2,7 @@ model_list:
   - model_name: chat
     litellm_params:
       model: hosted_vllm/Qwen/Qwen3-8B
-      api_base: http://vllm-chat:8000/v1
+      api_base: http://inference-gateway-istio/v1   # picks a replica per request (base/chat-routing.yaml)
   - model_name: embed
     litellm_params:
       model: hosted_vllm/Qwen/Qwen3-Embedding-0.6B

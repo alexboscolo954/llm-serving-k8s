@@ -34,9 +34,11 @@ spec:
           readinessProbe:
             httpGet: {path: /health/readiness, port: http}
             periodSeconds: 10
+            timeoutSeconds: 5   # the default 1 s fails on a saturated CPU node
           livenessProbe:
             httpGet: {path: /health/liveliness, port: http}
             periodSeconds: 20
+            timeoutSeconds: 5
           resources:
             requests: {cpu: 100m, memory: 512Mi}
             limits: {memory: 1Gi}

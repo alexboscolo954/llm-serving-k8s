@@ -49,8 +49,7 @@ for step in $steps; do
       -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
       --set dcgmExporter.serviceMonitor.enabled=false
     gpus 1
-    helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null; helm repo update cnpg >/dev/null
-    helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.1 -n cnpg-system --create-namespace --wait
+    make platform   # CNPG, Istio, Gateway API + Inference Extension CRDs
     kubectl create ns llm --dry-run=client -o yaml | kubectl apply -f -
     for k in litellm-master-key litellm-metrics-key; do
       kubectl -n llm create secret generic $k --from-literal=key="sk-$(openssl rand -hex 16)" \
@@ -58,6 +57,7 @@ for step in $steps; do
     done
     kubectl apply -k overlays/gpu
     kubectl -n llm wait --for=condition=Ready cluster/litellm-db --timeout=10m
+    kubectl -n llm wait --for=condition=Programmed gateway/inference-gateway --timeout=5m
     kubectl -n llm scale deploy/vllm-embed --replicas=0   # its shared profile only exists in the shared step
     kubectl -n llm rollout status sts/vllm-chat --timeout=20m
     mkdir -p "$out"

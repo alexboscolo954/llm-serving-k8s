@@ -7,3 +7,4 @@ resources:
   - litellm-db.yaml
   - litellm-metrics-key.yaml
   - network-policies.yaml
+  - chat-routing.yaml
