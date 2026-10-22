@@ -45,6 +45,10 @@ jobs:
         run: nohup make follow-chat >/dev/null 2>&1 &
       - run: make up
       - run: make test
+      - name: TEMPORARY - Triton kernels embed compiled while serving
+        run: |
+          kubectl -n llm logs deploy/vllm-embed | grep -E 'Model Runner|Triton' || true
+          kubectl -n llm exec deploy/vllm-embed -- sh -c 'd=$(python -c "from triton.runtime.cache import default_cache_dir; print(default_cache_dir())"); echo $d; find / -xdev -name "*.so" -newer /proc/1/cmdline -path "*triton*" 2>/dev/null; find $d -name "*.so" 2>/dev/null | wc -l'
       - run: make bench RUN=ci
       - uses: actions/upload-artifact@v7
         if: always()
