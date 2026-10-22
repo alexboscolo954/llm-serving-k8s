@@ -30,8 +30,10 @@ spec:
             # Two replicas of 4 threads each on 4 vCPUs stalled a step past the 300 s limit and killed the engine
             - {name: OMP_NUM_THREADS, value: "2"}
             - {name: VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS, value: "900"}
-            # A worker killed by a signal (SIGSEGV, SIGILL...) prints the signal and its stack (startup crash)
+            # A worker killed by a signal (SIGSEGV, SIGILL...) prints the signal and its stack
             - {name: PYTHONFAULTHANDLER, value: "1"}
+            # The V2 model runner's Triton-CPU kernels hit SIGILL (AVX-512 code) on runners whose CPU hides AVX-512
+            - {name: VLLM_USE_V2_MODEL_RUNNER, value: "0"}
           ports:
             - {name: http, containerPort: 8000}
           securityContext:
