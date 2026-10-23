@@ -22,7 +22,7 @@ VM      = llm-bench-l4 --zone $$($(TF) output -raw zone)
 # Gateway on localhost:4000 for the rest of the recipe line.
 GATEWAY := kubectl -n $(NS) port-forward svc/litellm 4000:4000 >/dev/null & PF=$$!; trap "kill $$PF" EXIT; sleep 3;
 
-.PHONY: up platform observe cost autoscale smoke test test-observability test-autoscaling logs-chat follow-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
+.PHONY: up repos platform observe cost autoscale smoke test test-observability test-autoscaling logs-chat follow-chat bench down validate bench-up bench-tunnel bench-gpu bench-down
 
 up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kind get clusters | grep -qx $(CLUSTER) || kind create cluster --config overlays/cpu-kind/kind-config.yaml
@@ -38,9 +38,16 @@ up: ## kind cluster + CNPG + CPU overlay, waits until the models are served
 	kubectl -n $(NS) rollout status deploy/litellm --timeout=5m
 	kubectl -n $(NS) wait --for=condition=complete job/litellm-metrics-key --timeout=5m
 
-platform: ## Platform layer every cluster needs: CNPG, Istio (inference gateway only), Gateway API + Inference Extension CRDs
+repos: ## Helm chart repositories every target installs from
+	helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null
+	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
 	helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null
 	helm repo add istio https://istio-release.storage.googleapis.com/charts >/dev/null
+	helm repo update nvidia opencost prometheus-community kedacore cnpg istio >/dev/null
+
+platform: repos ## Platform layer every cluster needs: CNPG, Istio (inference gateway only), Gateway API + Inference Extension CRDs
 	kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GWAPI)/standard-install.yaml
 	kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/$(GAIE)/manifests.yaml
 	kubectl apply --server-side -k "github.com/llm-d/llm-d-router/config/crd?ref=$(LLMD)"
@@ -48,20 +55,17 @@ platform: ## Platform layer every cluster needs: CNPG, Istio (inference gateway 
 	helm upgrade --install istio-base istio/base --version $(ISTIO) -n istio-system --create-namespace --wait
 	helm upgrade --install istiod istio/istiod --version $(ISTIO) -n istio-system -f platform/istiod-values.yaml --wait --timeout 10m
 
-observe: ## Prometheus + Grafana, then scrape the Backends and the Gateway (after `make up`)
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+observe: repos ## Prometheus + Grafana, then scrape the Backends and the Gateway (after `make up`)
 	helm upgrade --install $(KPS) prometheus-community/kube-prometheus-stack --version 92.10.1 \
 	  -n monitoring --create-namespace -f platform/kube-prometheus-stack-values.yaml --wait --timeout 10m
 	kubectl apply -k observability
 
-cost: ## OpenCost on the price sheet in platform/opencost-values.yaml (after `make observe`)
-	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
+cost: repos ## OpenCost on the price sheet in platform/opencost-values.yaml (after `make observe`)
 	helm upgrade --install opencost opencost/opencost --version 2.5.33 \
 	  -n opencost --create-namespace -f platform/opencost-values.yaml --wait --timeout 10m
 	kubectl -n opencost rollout status deploy/opencost --timeout=5m   # helm --wait has returned before the pod ran: the tests' port-forward then exits
 
-autoscale: ## KEDA, then scale the chat Backend on its queue (after `make observe`)
-	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
+autoscale: repos ## KEDA, then scale the chat Backend on its queue (after `make observe`)
 	helm upgrade --install keda kedacore/keda --version 2.21.0 -n keda --create-namespace --wait --timeout 10m
 	kubectl apply -k autoscaling
 
@@ -130,13 +134,11 @@ bench-down: ## delete the VM and its network, then prove nothing is left running
 down:
 	kind delete cluster --name $(CLUSTER)
 
-validate: ## render, schema-check and policy-check everything, no cluster needed
+validate: repos ## render, schema-check and policy-check everything, no cluster needed
 	for o in cpu-kind gpu; do kubectl kustomize overlays/$$o | kubeconform -strict -summary -kubernetes-version $(K8S) -schema-location default -schema-location '$(CRDS)' -skip InferencePool - || exit 1; done   # no InferencePool schema in the catalog yet
 	for o in cpu-kind gpu; do kubectl kustomize overlays/$$o | kyverno apply policies/serving.yaml --resource - || exit 1; done
-	kyverno apply policies/serving.yaml --resource bench/job.yaml
 	kyverno apply policies/serving.yaml --resource policies/violations.yaml 2>&1 | grep -q 'fail: 4,'   # every rule must bite
-	kyverno apply policies/serving.yaml --resource bench/embed-load.yaml
-	kyverno apply policies/serving.yaml --resource bench/chat-load.yaml
+	kyverno apply policies/serving.yaml --resource bench/job.yaml --resource bench/embed-load.yaml --resource bench/chat-load.yaml
 	for d in observability autoscaling; do kubectl kustomize $$d | kubeconform -strict -summary -kubernetes-version $(K8S) -schema-location default -schema-location '$(CRDS)' - || exit 1; done
 	d=$$(mktemp -d) && cp observability/vllm-rules.test.yaml $$d/ && \
 	  python3 -c 'import sys,yaml; yaml.safe_dump(yaml.safe_load(open(sys.argv[1]))["spec"], sys.stdout)' observability/vllm-rules.yaml > $$d/vllm-rules.yaml && \
@@ -145,13 +147,6 @@ validate: ## render, schema-check and policy-check everything, no cluster needed
 	terraform -chdir=bench/infra fmt -check
 	terraform -chdir=bench/infra init -backend=false -input=false >/dev/null && terraform -chdir=bench/infra validate
 	$(PYTEST) -q bench
-	helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null
-	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
-	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
-	helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null
-	helm repo add istio https://istio-release.storage.googleapis.com/charts >/dev/null
-	helm repo update nvidia opencost prometheus-community kedacore cnpg istio >/dev/null
 	helm template gpu-operator nvidia/gpu-operator --version v26.7.1 -n gpu-operator -f platform/gpu-operator-values.yaml -f platform/gpu-operator-rke2-values.yaml \
 	  | kubeconform -summary -ignore-missing-schemas -kubernetes-version $(K8S) -
 	helm template opencost opencost/opencost --version 2.5.33 -n opencost -f platform/opencost-values.yaml \

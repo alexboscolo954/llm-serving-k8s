@@ -71,7 +71,7 @@ for step in $steps; do
     kubectl create ns llm --dry-run=client -o yaml | kubectl apply -f -
     make observe   # Prometheus first: the GPU Operator's DCGM ServiceMonitor needs its CRDs
     make cost
-    helm repo add nvidia https://helm.ngc.nvidia.com/nvidia >/dev/null; helm repo update nvidia >/dev/null
+    make repos
     kubectl create ns gpu-operator --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f platform/time-slicing-config.yaml
     kubectl label node "$node" nvidia.com/device-plugin.config=dedicated --overwrite
