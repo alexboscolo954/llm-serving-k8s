@@ -2,7 +2,7 @@
 
 OpenCost 1.121.3 (chart 2.5.33) on the price sheet in [`platform/opencost-values.yaml`](../../../platform/opencost-values.yaml): $0.03 per core-hour, $0.004 per GiB-hour, $2.50 per GPU-hour.
 Same cluster as the [Benchmark sessions](../2026-10-22-l4) (single-node RKE2 on a GCP `g2-standard-12`, us-central1-a), versions in [`setup.md`](setup.md).
-Each step holds the Backends idle for 10 minutes, then runs CI's cost tests ([`tests/test_cost.py`](../../../tests/test_cost.py)) against the cluster and saves OpenCost's allocation per pod for the last 10 minutes (`<step>.json`). OpenCost charges a pod for what it holds (its requests, or its usage if higher), so load does not change the GPU result. GPU utilisation per pod is not wired into OpenCost (`gpuUsageAverage` is empty in every allocation); fixed in [2026-10-23-l4-gpu-usage](../2026-10-23-l4-gpu-usage)).
+Each step holds the Backends idle for 10 minutes, then runs CI's cost tests ([`tests/test_cost.py`](../../../tests/test_cost.py)) against the cluster and saves OpenCost's allocation per pod for the last 10 minutes (`<step>.json`). OpenCost charges a pod for what it holds (its requests, or its usage if higher), so load does not change the GPU result. GPU utilisation per pod is not wired into OpenCost (`gpuUsageAverage` is empty in every allocation; fixed in [2026-10-23-l4-gpu-usage](../2026-10-23-l4-gpu-usage)).
 
 ## Dedicated GPU: chat holds the whole card
 
