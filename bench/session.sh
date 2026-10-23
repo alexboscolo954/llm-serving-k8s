@@ -2,7 +2,7 @@
 # shellcheck disable=SC2086 # $BENCH and $DIRECT are lists of ENV=value words, split on purpose
 # GPU Benchmark session on the single-L4 RKE2 VM from bench/infra.
 #   KUBECONFIG=~/k8s_clusters/llm-bench-l4.yaml bench/session.sh <out-dir> [step ...]
-# Steps: platform e2e overhead shared (default, in that order); cost and cost-shared by name. The first
+# Steps: platform e2e overhead shared (default, in that order); cost, cost-shared and autoscale by name. The first
 # session's fp8, gateway, bf16 and the opt-in bf16-64 still run by name; BF16 at
 # concurrency 64 did not finish in an hour on one L4.
 # Results land on the laptop after every step, so a spot preemption only
@@ -172,6 +172,42 @@ for step in $steps; do
     kubectl -n llm rollout status deploy/vllm-embed --timeout=15m
     sleep 600
     cost cost-shared
+    ;;
+  autoscale)  # KEDA adds a second chat replica on the same time-sliced L4, and the Endpoint Picker routes to it.
+    # Qwen3-8B doesn't fit twice on one card, so both replicas run Qwen3-4B, each capped at 4 sequences so
+    # a 16-concurrent load queues, as in CI. Shows scale-up and routing on GPUs, not added capacity.
+    # Run it last: it leaves two Qwen3-4B replicas and KEDA behind.
+    kubectl -n llm scale deploy/vllm-embed --replicas=0
+    kubectl label node "$node" nvidia.com/device-plugin.config=shared --overwrite
+    gpus 4
+    gateway_model() {  # gateway_model <from> <to>: point the Gateway's chat model at another model
+      cm=$(kubectl -n llm get deploy litellm -o jsonpath='{.spec.template.spec.volumes[*].configMap.name}')
+      kubectl -n llm get cm "$cm" -o yaml | sed "s#$1#$2#" | kubectl replace -f -
+      kubectl -n llm rollout restart deploy/litellm && kubectl -n llm rollout status deploy/litellm --timeout=5m
+    }
+    gateway_model Qwen/Qwen3-8B Qwen/Qwen3-4B
+    # Two replicas of the overlay's 32Gi request don't fit the VM's 48 GB: replica 1 would stay Pending
+    kubectl -n llm patch sts vllm-chat --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources",
+      "value":{"requests":{"cpu":"2","memory":"12Gi","nvidia.com/gpu":1},"limits":{"memory":"24Gi","nvidia.com/gpu":1}}}]'
+    CHAT_ARGS='["Qwen/Qwen3-4B","--port=8000","--max-model-len=4096"'
+    chat '"--quantization=fp8","--gpu-memory-utilization=0.45","--max-num-seqs=4"' shared
+    make autoscale
+    kubectl -n llm apply -f bench/chat-load.yaml
+    kubectl -n llm port-forward svc/litellm 14000:4000 >/dev/null 2>&1 & pf=$!
+    prometheus
+    GATEWAY_URL=http://localhost:14000 GATEWAY_KEY=$(secret litellm-master-key) PROM_URL=http://localhost:19090 \
+      CHAT_MODEL=Qwen/Qwen3-4B python3 -m pytest -v -s tests/test_autoscaling.py > "$out/autoscale.txt" 2>&1 \
+      || echo "autoscaling tests failed"
+    kill $pf
+    kubectl -n llm delete -f bench/chat-load.yaml --ignore-not-found
+    kubectl -n llm get pods,pvc,hpa -o wide > "$out/autoscale-pods.txt"
+    kubectl -n llm describe hpa >> "$out/autoscale-pods.txt"
+    kubectl describe node "$node" | sed -n '/Allocated resources/,/Events/p' >> "$out/autoscale-pods.txt"
+    for p in vllm-chat-0 vllm-chat-1; do   # created, scheduled, Ready: the second replica's cold start on a GPU
+      kubectl -n llm get pod $p -o jsonpath='{.metadata.name} created={.metadata.creationTimestamp} {range .status.conditions[*]}{.type}={.lastTransitionTime} {end}{"\n"}'
+    done > "$out/autoscale-timeline.txt"
+    kubectl -n gpu-operator exec ds/nvidia-driver-daemonset -- nvidia-smi > "$out/autoscale-nvidia-smi.txt"   # one card, two replicas
+    tail -20 "$out/autoscale.txt"; cat "$out/autoscale-timeline.txt"
     ;;
   *) echo "unknown step: $step"; exit 1 ;;
   esac

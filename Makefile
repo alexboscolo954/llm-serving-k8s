@@ -58,6 +58,7 @@ cost: ## OpenCost on the price sheet in platform/opencost-values.yaml (after `ma
 	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
 	helm upgrade --install opencost opencost/opencost --version 2.5.33 \
 	  -n opencost --create-namespace -f platform/opencost-values.yaml --wait --timeout 10m
+	kubectl -n opencost rollout status deploy/opencost --timeout=5m   # helm --wait has returned before the pod ran: the tests' port-forward then exits
 
 autoscale: ## KEDA, then scale the chat Backend on its queue (after `make observe`)
 	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
@@ -119,7 +120,7 @@ bench-tunnel: ## (re)open the SSH tunnel to the VM's Kubernetes API on localhost
 	KUBECONFIG=$(BENCHKC) kubectl get nodes
 
 bench-gpu: ## GPU Benchmark session (STEPS= to run a subset); results in bench/results/<date>-l4
-	KUBECONFIG=$(BENCHKC) bench/session.sh bench/results/$(shell date +%F)-l4 $(STEPS)
+	KUBECONFIG=$(BENCHKC) bench/session.sh bench/results/$(shell date -u +%F)-l4 $(STEPS)
 
 bench-down: ## delete the VM and its network, then prove nothing is left running
 	-pkill -f '16443:127.0.0.1:6443'

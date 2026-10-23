@@ -1,0 +1,18 @@
+[1m============================= test session starts ==============================[0m
+platform darwin -- Python 3.12.4, pytest-9.0.2, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/alex.boscolo/llm-serving-k8s
+plugins: anyio-4.14.0
+[1mcollecting ... [0mcollected 5 items
+
+tests/test_autoscaling.py::test_queue_builds_under_load [32mPASSED[0m
+tests/test_autoscaling.py::test_keda_scales_to_two [32mPASSED[0m
+tests/test_autoscaling.py::test_new_replica_ready_with_its_own_cache [32mPASSED[0m
+tests/test_autoscaling.py::test_gateway_sends_traffic_to_the_new_replica 
+requests finished per chat replica, last 5m: {'vllm-chat-0': 370, 'vllm-chat-1': 25}
+[32mPASSED[0m
+tests/test_autoscaling.py::test_new_replica_serves 
+replica 1 answered in 1s
+[32mPASSED[0m
+
+[32m======================== [32m[1m5 passed[0m[32m in 399.34s (0:06:39)[0m[32m =========================[0m

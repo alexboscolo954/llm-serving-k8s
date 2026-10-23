@@ -3,6 +3,7 @@ Gateway and Prometheus). Under load the chat Backend's queue builds, KEDA adds a
 that replica gets its own weights cache, receives Gateway traffic through the Endpoint
 Picker once the load stops, and answers on its own. Tests run in order."""
 import json
+import os
 import socket
 import subprocess
 import time
@@ -11,6 +12,7 @@ import urllib.request
 from test_gateway import chat, post
 from test_observability import eventually, query
 
+MODEL = os.environ.get("CHAT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")   # the GPU session's replicas run Qwen3-4B
 WAITING = 'sum(vllm:num_requests_waiting{namespace="llm", pod=~"vllm-chat-[0-9]+"})'
 
 
@@ -73,7 +75,7 @@ def test_new_replica_serves():
                 time.sleep(1)
         req = urllib.request.Request(
             "http://localhost:8001/v1/chat/completions",
-            data=json.dumps(chat(model="Qwen/Qwen2.5-0.5B-Instruct")).encode(),
+            data=json.dumps(chat(model=MODEL)).encode(),
             headers={"Content-Type": "application/json"})
         # Replica 0 keeps all 4 vCPUs busy, so one short request here took 4-5 minutes in CI.
         start = time.time()

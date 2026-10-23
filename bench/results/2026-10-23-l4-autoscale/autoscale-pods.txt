@@ -1,0 +1,64 @@
+NAME                                           READY   STATUS      RESTARTS   AGE     IP           NODE                                                NOMINATED NODE   READINESS GATES
+pod/chat-epp-744dd8964f-gqggs                  1/1     Running     0          22m     10.42.0.35   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+pod/inference-gateway-istio-547d9d8fd9-4dxxf   1/1     Running     0          22m     10.42.0.39   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+pod/litellm-6d4cd8f4d4-fs7kp                   1/1     Running     0          12m     10.42.0.44   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+pod/litellm-db-1                               1/1     Running     0          21m     10.42.0.43   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+pod/litellm-metrics-key-4wb58                  0/1     Completed   0          22m     10.42.0.38   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+pod/vllm-chat-0                                1/1     Running     0          11m     10.42.0.45   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+pod/vllm-chat-1                                1/1     Running     0          4m53s   10.42.0.51   llm-bench-l4.us-central1-a.c.vllm-511814.internal   <none>           <none>
+
+NAME                                         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE     VOLUMEMODE
+persistentvolumeclaim/hf-cache-vllm-chat-0   Bound    pvc-9031ba57-bab7-46a2-b8b1-88ab9b3ba3ac   50Gi       RWO            local-path     <unset>                 22m     Filesystem
+persistentvolumeclaim/hf-cache-vllm-chat-1   Bound    pvc-d431d5b8-96f6-4211-ad63-9ab9b2021e2b   50Gi       RWO            local-path     <unset>                 4m53s   Filesystem
+persistentvolumeclaim/litellm-db-1           Bound    pvc-67e3d989-2a46-4407-878d-abb21be41aa3   1Gi        RWO            local-path     <unset>                 22m     Filesystem
+
+NAME                                                     REFERENCE               TARGETS     MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/keda-hpa-vllm-chat   StatefulSet/vllm-chat   0/4 (avg)   1         2         2          6m54s
+Name:                                      keda-hpa-vllm-chat
+Namespace:                                 llm
+Labels:                                    app.kubernetes.io/managed-by=keda-operator
+                                           app.kubernetes.io/name=keda-hpa-vllm-chat
+                                           app.kubernetes.io/part-of=vllm-chat
+                                           app.kubernetes.io/version=2.21.0
+                                           scaledobject.keda.sh/name=vllm-chat
+Annotations:                               <none>
+CreationTimestamp:                         Thu, 22 Oct 2026 21:27:07 -0300
+Reference:                                 StatefulSet/vllm-chat
+Metrics:                                   ( current / target )
+  "s0-prometheus" (target average value):  0 / 4
+Min replicas:                              1
+Max replicas:                              2
+Behavior:
+  Scale Up:
+    Stabilization Window: 0 seconds
+    Select Policy: Max
+    Policies:
+      - Type: Pods     Value: 4    Period: 15 seconds
+      - Type: Percent  Value: 100  Period: 15 seconds
+  Scale Down:
+    Stabilization Window: 600 seconds
+    Select Policy: Max
+    Policies:
+      - Type: Percent  Value: 100  Period: 15 seconds
+StatefulSet pods:      2 current / 2 desired
+Conditions:
+  Type            Status  Reason               Message
+  ----            ------  ------               -------
+  AbleToScale     True    ScaleDownStabilized  recent recommendations were higher than current one, applying the highest recent recommendation
+  ScalingActive   True    ValidMetricFound     the HPA was able to successfully calculate a replica count from external metric s0-prometheus(&LabelSelector{MatchLabels:map[string]string{scaledobject.keda.sh/name: vllm-chat,},MatchExpressions:[]LabelSelectorRequirement{},})
+  ScalingLimited  False   DesiredWithinRange   the desired count is within the acceptable range
+Events:
+  Type    Reason             Age    From                       Message
+  ----    ------             ----   ----                       -------
+  Normal  SuccessfulRescale  4m56s  horizontal-pod-autoscaler  New size: 2; reason: external metric s0-prometheus(&LabelSelector{MatchLabels:map[string]string{scaledobject.keda.sh/name: vllm-chat,},MatchExpressions:[]LabelSelectorRequirement{},}) above target
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests       Limits
+  --------           --------       ------
+  cpu                6960m (57%)    5700m (47%)
+  memory             29936Mi (62%)  66006Mi (137%)
+  ephemeral-storage  0 (0%)         0 (0%)
+  hugepages-1Gi      0 (0%)         0 (0%)
+  hugepages-2Mi      0 (0%)         0 (0%)
+  nvidia.com/gpu     2              2
+Events:
