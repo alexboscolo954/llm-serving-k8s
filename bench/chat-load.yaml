@@ -12,7 +12,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: load
-          image: vllm/vllm-openai-cpu:v0.31.0
+          image: vllm/vllm-openai-cpu:v0.31.0@sha256:495c84fe30f3572b83a78100a1e8ba423dbb77fc532ecefebe114e6b77327bd9
           # Rounds of 2000 prompts: vllm bench builds the whole dataset before it sends
           # anything, so a million prompts would hold back the first request.
           command: [sh, -c]

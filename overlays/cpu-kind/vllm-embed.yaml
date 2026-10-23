@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: vllm
-          image: vllm/vllm-openai-cpu:v0.31.0
+          image: vllm/vllm-openai-cpu:v0.31.0@sha256:495c84fe30f3572b83a78100a1e8ba423dbb77fc532ecefebe114e6b77327bd9
           # No Triton-CPU, V1 model runner: same SIGILL fix as vllm-chat.yaml
           command: [sh, -c, 'rm -r /opt/venv/lib/python3.12/site-packages/triton/backends/cpu && exec vllm serve "$@"', vllm]
           args:

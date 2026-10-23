@@ -47,7 +47,7 @@ def reach(url, direct_access):
     labels = "llm-serving/direct-access=true" if direct_access else "app=netpol-probe"
     r = subprocess.run(
         ["kubectl", "-n", "llm", "run", f"netpol-probe-{uuid.uuid4().hex[:6]}", "--rm", "-i", "--quiet",
-         "--restart=Never", "--image=litellm/litellm:v1.104.2", f"--labels={labels}", "--command", "--",
+         "--restart=Never", "--image=litellm/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500", f"--labels={labels}", "--command", "--",
          "python3", "-c", f"import urllib.request; urllib.request.urlopen('{url}', timeout=5)"],
         capture_output=True, text=True, timeout=300)
     return r.returncode == 0

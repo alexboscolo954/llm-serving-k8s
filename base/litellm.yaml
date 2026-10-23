@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: litellm
-          image: litellm/litellm:v1.104.2
+          image: litellm/litellm:v1.104.2@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           env:
             - name: LITELLM_MASTER_KEY
