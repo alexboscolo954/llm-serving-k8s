@@ -9,3 +9,6 @@ devicePlugin:
 dcgmExporter:            # on by default: GPU metrics for Prometheus
   serviceMonitor:
     enabled: true        # needs the Prometheus Operator CRDs
+    # Keep the exporter's pod/namespace/container labels (the pod using the GPU). Without this Prometheus
+    # renames them exported_* and fills in the exporter's own pod, so OpenCost finds no GPU usage per Backend.
+    honorLabels: true

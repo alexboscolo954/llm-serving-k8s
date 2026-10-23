@@ -2,7 +2,7 @@
 # shellcheck disable=SC2086 # $BENCH and $DIRECT are lists of ENV=value words, split on purpose
 # GPU Benchmark session on the single-L4 RKE2 VM from bench/infra.
 #   KUBECONFIG=~/k8s_clusters/llm-bench-l4.yaml bench/session.sh <out-dir> [step ...]
-# Steps: platform e2e overhead shared (default, in that order); cost, cost-shared and autoscale by name. The first
+# Steps: platform e2e overhead shared (default, in that order); cost, cost-shared, gpu-usage and autoscale by name. The first
 # session's fp8, gateway, bf16 and the opt-in bf16-64 still run by name; BF16 at
 # concurrency 64 did not finish in an hour on one L4.
 # Results land on the laptop after every step, so a spot preemption only
@@ -42,6 +42,9 @@ wait_for() {  # wait_for <minutes> <what> <command...>: poll every 10 s, fail af
 gpu_count_is() { [ "$(kubectl get node "$node" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')" = "$1" ]; }
 gpus() { wait_for 20 "$1 GPUs on $node" gpu_count_is "$1"; }   # gpus <n>: n advertised nvidia.com/gpu
 
+# The SSH tunnel to the API can die during a long sleep (it did on 2026-10-23): reopen it if the API is unreachable.
+tunnel() { kubectl get --raw /readyz >/dev/null 2>&1 || make bench-tunnel >/dev/null; }
+
 secret() { kubectl -n llm get secret "$1" -o jsonpath='{.data.key}' | base64 -d; }
 embed_busy() { kubectl -n llm logs deploy/vllm-embed --since=1m | grep -q 'POST /v1/embeddings'; }
 prometheus() {  # port-forward Prometheus to localhost:19090 for prom
@@ -53,6 +56,7 @@ prom() {  # prom <out-file> <query>: save a Prometheus instant query
 }
 cost() {  # cost <name>: CI's cost tests on this cluster, then save the last 10 minutes' cost per pod
   mkdir -p "$out"
+  tunnel
   kubectl -n opencost port-forward svc/opencost 19003:9003 >/dev/null 2>&1 & pf=$!
   prometheus; sleep 3
   OPENCOST_URL=http://localhost:19003 PROM_URL=http://localhost:19090 \
@@ -64,6 +68,7 @@ cost() {  # cost <name>: CI's cost tests on this cluster, then save the last 10 
 
 for step in $steps; do
   echo "=== $step"
+  tunnel
   case $step in
   platform)
     kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
@@ -172,6 +177,17 @@ for step in $steps; do
     kubectl -n llm rollout status deploy/vllm-embed --timeout=15m
     sleep 600
     cost cost-shared
+    ;;
+  gpu-usage)  # chat busy on the whole GPU for 10 minutes: OpenCost gets its GPU usage from DCGM
+    kubectl -n llm scale deploy/vllm-embed --replicas=0
+    kubectl label node "$node" nvidia.com/device-plugin.config=dedicated --overwrite
+    gpus 1
+    chat '"--quantization=fp8","--gpu-memory-utilization=0.90"' dedicated
+    kubectl -n llm apply -f bench/chat-load.yaml
+    sleep 600
+    cost gpu-usage
+    prom "$out/gpu-usage-dcgm.json" 'DCGM_FI_PROF_GR_ENGINE_ACTIVE'   # pod/namespace/container: the Backend's, not the exporter's
+    kubectl -n llm delete -f bench/chat-load.yaml
     ;;
   autoscale)  # KEDA adds a second chat replica on the same time-sliced L4, and the Endpoint Picker routes to it.
     # Qwen3-8B doesn't fit twice on one card, so both replicas run Qwen3-4B, each capped at 4 sequences so

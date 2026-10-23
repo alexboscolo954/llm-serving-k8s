@@ -1,7 +1,8 @@
 # helm install opencost opencost/opencost --version 2.5.33 \
 #   -n opencost --create-namespace -f platform/opencost-values.yaml   (`make observe` does this)
 # On-prem: no cloud billing API, so cost comes from a custom price sheet.
-# A pod pays for the GPUs it requests; OpenCost does not read GPU utilisation from DCGM here.
+# A pod pays for the GPUs it requests. GPU usage per pod (gpuUsageAverage) comes from DCGM through Prometheus
+# (platform/gpu-operator-values.yaml keeps the exporter's pod labels for that).
 opencost:
   prometheus:
     internal:

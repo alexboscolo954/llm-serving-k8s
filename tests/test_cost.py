@@ -7,6 +7,8 @@ import subprocess
 import urllib.parse
 import urllib.request
 
+import pytest
+
 from test_observability import eventually, query
 
 OPENCOST = os.environ.get("OPENCOST_URL", "http://localhost:9003")
@@ -56,3 +58,17 @@ def test_each_backend_costs_its_hours_at_sheet_prices():
             assert close(a["gpuCost"], a["gpuHours"] * sheet["GPU"]), (pod, a["gpuCost"], a["gpuHours"])   # 0 on kind
         return {p: round(a["totalCost"], 5) for p, a in pods.items()}
     print("\ncost per Backend, last 10 minutes (USD):", eventually(check))
+
+
+def test_gpu_usage_reaches_each_gpu_backend():
+    # OpenCost reads DCGM's per-pod GPU activity; a Backend holding a GPU must get a usage figure, not null.
+    def check():
+        pods = {p: a for p, a in backends().items() if a["gpuHours"] > 0}
+        if not pods:
+            return pods
+        assert all(a["gpuAllocation"]["gpuUsageAverage"] is not None for a in pods.values()), pods
+        return {p: a["gpuAllocation"]["gpuUsageAverage"] for p, a in pods.items()}
+    usage = eventually(check)
+    if not usage:
+        pytest.skip("no Backend holds a GPU (kind)")
+    print("\nGPU usage average per Backend, last 10 minutes:", usage)

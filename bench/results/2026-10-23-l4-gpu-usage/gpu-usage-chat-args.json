@@ -1,0 +1,1 @@
+["Qwen/Qwen3-8B","--port=8000","--max-model-len=16384","--quantization=fp8","--gpu-memory-utilization=0.90"]
