@@ -24,7 +24,7 @@ spec:
         - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
       containers:
         - name: vllm
-          image: vllm/vllm-openai:v0.31.0
+          image: vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
           args:
             - Qwen/Qwen3-8B
             - --port=8000

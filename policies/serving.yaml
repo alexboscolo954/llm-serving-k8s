@@ -63,7 +63,7 @@ spec:
         operations: [CREATE, UPDATE]
         resources: [jobs]
   validations:
-    - message: Images need an explicit version tag.
+    - message: Images need a version tag and a digest, so a re-pushed tag can't change what runs.
       expression: >-
         object.spec.template.spec.containers.all(c,
-          c.image.matches(':[^/]+$') && !c.image.endsWith(':latest'))
+          c.image.matches(':[^/:@]+@sha256:[0-9a-f]{64}$'))
