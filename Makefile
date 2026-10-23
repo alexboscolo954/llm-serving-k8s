@@ -58,6 +58,7 @@ cost: ## OpenCost on the price sheet in platform/opencost-values.yaml (after `ma
 	helm repo add opencost https://opencost.github.io/opencost-helm-chart >/dev/null
 	helm upgrade --install opencost opencost/opencost --version 2.5.33 \
 	  -n opencost --create-namespace -f platform/opencost-values.yaml --wait --timeout 10m
+	kubectl -n opencost rollout status deploy/opencost --timeout=5m   # helm --wait has returned before the pod ran: the tests' port-forward then exits
 
 autoscale: ## KEDA, then scale the chat Backend on its queue (after `make observe`)
 	helm repo add kedacore https://kedacore.github.io/charts >/dev/null
