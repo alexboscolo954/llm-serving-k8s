@@ -119,7 +119,7 @@ bench-tunnel: ## (re)open the SSH tunnel to the VM's Kubernetes API on localhost
 	KUBECONFIG=$(BENCHKC) kubectl get nodes
 
 bench-gpu: ## GPU Benchmark session (STEPS= to run a subset); results in bench/results/<date>-l4
-	KUBECONFIG=$(BENCHKC) bench/session.sh bench/results/$(shell date +%F)-l4 $(STEPS)
+	KUBECONFIG=$(BENCHKC) bench/session.sh bench/results/$(shell date -u +%F)-l4 $(STEPS)
 
 bench-down: ## delete the VM and its network, then prove nothing is left running
 	-pkill -f '16443:127.0.0.1:6443'
