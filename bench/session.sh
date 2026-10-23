@@ -42,6 +42,9 @@ wait_for() {  # wait_for <minutes> <what> <command...>: poll every 10 s, fail af
 gpu_count_is() { [ "$(kubectl get node "$node" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')" = "$1" ]; }
 gpus() { wait_for 20 "$1 GPUs on $node" gpu_count_is "$1"; }   # gpus <n>: n advertised nvidia.com/gpu
 
+# The SSH tunnel to the API can die during a long sleep (it did on 2026-10-23): reopen it if the API is unreachable.
+tunnel() { kubectl get --raw /readyz >/dev/null 2>&1 || make bench-tunnel >/dev/null; }
+
 secret() { kubectl -n llm get secret "$1" -o jsonpath='{.data.key}' | base64 -d; }
 embed_busy() { kubectl -n llm logs deploy/vllm-embed --since=1m | grep -q 'POST /v1/embeddings'; }
 prometheus() {  # port-forward Prometheus to localhost:19090 for prom
@@ -53,6 +56,7 @@ prom() {  # prom <out-file> <query>: save a Prometheus instant query
 }
 cost() {  # cost <name>: CI's cost tests on this cluster, then save the last 10 minutes' cost per pod
   mkdir -p "$out"
+  tunnel
   kubectl -n opencost port-forward svc/opencost 19003:9003 >/dev/null 2>&1 & pf=$!
   prometheus; sleep 3
   OPENCOST_URL=http://localhost:19003 PROM_URL=http://localhost:19090 \
@@ -64,6 +68,7 @@ cost() {  # cost <name>: CI's cost tests on this cluster, then save the last 10 
 
 for step in $steps; do
   echo "=== $step"
+  tunnel
   case $step in
   platform)
     kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
